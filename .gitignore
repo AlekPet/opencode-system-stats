@@ -1,0 +1,18 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# logs & debug artifacts
+*.log
+*.tsbuildinfo
+
+# OS/editor cruft
+.DS_Store
+.vscode/
+.idea/
+
+# firecrawl / tmp
+.firecrawl/
+/tmp/
