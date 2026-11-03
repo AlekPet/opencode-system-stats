@@ -14,6 +14,34 @@ const PRESETS = [
   { value: 5000, label: "5000 ms — background" },
 ]
 
+// Options shared by the `/view-stats-refresh` command and by clicking the
+// panel footer. Kept as a plain list so both call sites stay in sync.
+const REFRESH_OPTIONS = PRESETS.map((p) => ({
+  title: p.label,
+  value: `${p.value}ms`,
+}))
+
+// Open the floating refresh-rate selector and apply the chosen interval.
+// Shared by the palette command and the panel footer's `onClick`.
+function applyRefreshRate(
+  context: ReturnType<typeof usePlugin>,
+  refreshMs: () => number,
+  setRefreshMs: (ms: number) => void,
+) {
+  return context.ui.dialog
+    .select({
+      title: "Stats refresh rate",
+      current: `${refreshMs()}ms`,
+      options: REFRESH_OPTIONS,
+    })
+    .then((chosen) => {
+      if (chosen) {
+        const ms = Number.parseInt(chosen.replace(/ms$/, ""), 10)
+        if (!Number.isNaN(ms) && ms > 0) setRefreshMs(ms)
+      }
+    })
+}
+
 function fmtTemp(c: number | null): string {
   return c == null ? "—" : `${Math.round(c)}°C`
 }
@@ -164,19 +192,8 @@ export default Plugin.define({
           title: "Set stats refresh rate",
           palette: true,
           slash: { name: "view-stats-refresh" },
-          run: async () => {
-            const chosen = await context.ui.dialog.select({
-              title: "Stats refresh rate",
-              current: `${refreshMs()}ms`,
-              options: PRESETS.map((p) => ({
-                title: p.label,
-                value: `${p.value}ms`,
-              })),
-            })
-            if (chosen) {
-              const ms = Number.parseInt(chosen.replace(/ms$/, ""), 10)
-              if (!Number.isNaN(ms) && ms > 0) setRefreshMs(ms)
-            }
+          run: () => {
+            void applyRefreshRate(context, refreshMs, setRefreshMs)
           },
         },
       ],
@@ -234,10 +251,15 @@ function Panel(props: {
 }) {
   const context = usePlugin()
   const theme = context.theme
-  const cols = Math.max(28, Math.min(props.width ?? 48, 64))
   const latest = props.latest
   const error = props.error
   const refreshMs = props.refreshMs
+
+  // Inner padding per side and the bordered frame it adds to the width.
+  const PADDING = 1 // was 2 — tighter panel
+  const FRAME = 2 // left + right border
+  const MIN_COLS = 32
+  const MAX_COLS = 52
 
   // Force a re-render once per second so "updated Ns ago" keeps ticking even
   // between successful refreshes. Reads a plain, non-reactive local tick value
@@ -266,13 +288,38 @@ function Panel(props: {
     return theme.text.base
   }
 
+  // Width hugs the widest rendered line so the panel never wastes horizontal
+  // space and still wraps gracefully on a tiny window. Each glyph is one cell
+  // in the monospace renderer, so string length is a good proxy.
+  const contentCols = (): number => {
+    const snap = latest()
+    if (!snap) return MIN_COLS
+    const lines = [
+      "System Stats",
+      `GPU    ${snap.gpu.name ?? "N/A"}`,
+      `  VRAM ${snap.gpu.usedMiB} / ${snap.gpu.totalMiB} MiB`,
+      `  Util ${Math.round(snap.gpu.utilPct)}%`,
+      `  Temp ${fmtTemp(snap.gpu.tempC)}`,
+      `RAM    ${formatGB(snap.ram.usedBytes)} / ${formatGB(snap.ram.totalBytes)}`,
+      `  Free ${formatGB(snap.ram.freeBytes)}`,
+      `CPU    ${Math.round(snap.cpu.loadPct)}%`,
+      `  Temp ${fmtTemp(snap.cpu.tempC)}`,
+      `обновлено ${updatedLabel() ?? "—"} · refresh ${refreshMs()}ms`,
+    ]
+    return Math.max(MIN_COLS, ...lines.map((l) => l.length))
+  }
+  const cols = Math.min(
+    MAX_COLS,
+    Math.max(MIN_COLS, contentCols() + PADDING * 2 + FRAME),
+  )
+
   return (
     <Show
       // Compare to `null` (not pass the snapshot itself) so the tree is built
       // once and only its reactive attributes update on each refresh.
       when={latest() !== null}
       fallback={
-        <box flexDirection="column" gap={1}>
+        <box border borderStyle="rounded" padding={PADDING} backgroundColor="#1e1e1e">
           <text fg={theme.text.muted}>Collecting stats…</text>
           <Show when={error()}>
             <text fg="#ff5555">{error()}</text>
@@ -283,8 +330,7 @@ function Panel(props: {
       <box
         border
         borderStyle="rounded"
-        padding={2}
-        gap={1}
+        padding={PADDING}
         width={cols}
         backgroundColor="#1e1e1e"
       >
@@ -292,7 +338,7 @@ function Panel(props: {
           System Stats
         </text>
 
-        <box flexDirection="column" gap={1} marginY={1}>
+        <box flexDirection="column" gap={0} marginY={1}>
           <StatRow label="GPU" value={latest()!.gpu.name ?? "N/A"} />
           <StatRow
             label="  VRAM"
@@ -310,7 +356,7 @@ function Panel(props: {
           />
         </box>
 
-        <box flexDirection="column" gap={1} marginY={1}>
+        <box flexDirection="column" gap={0} marginY={1}>
           <StatRow
             label="RAM"
             value={`${formatGB(latest()!.ram.usedBytes)} / ${formatGB(
@@ -320,7 +366,7 @@ function Panel(props: {
           <StatRow label="  Free" value={formatGB(latest()!.ram.freeBytes)} />
         </box>
 
-        <box flexDirection="column" gap={1} marginY={1}>
+        <box flexDirection="column" gap={0} marginY={1}>
           <StatRow
             label="CPU"
             value={`${Math.round(latest()!.cpu.loadPct)}%`}
@@ -333,7 +379,13 @@ function Panel(props: {
           />
         </box>
 
-        <text marginY={1} fg={theme.text.muted} font="dim">
+        <text
+          marginY={1}
+          fg={theme.text.muted}
+          font="dim"
+          title="click to change refresh rate"
+          onClick={() => void applyRefreshRate(context, refreshMs, setRefreshMs)}
+        >
           {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
           {refreshMs()}ms
         </text>
