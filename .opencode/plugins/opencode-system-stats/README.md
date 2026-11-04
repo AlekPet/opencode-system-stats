@@ -12,6 +12,9 @@ TUI, with a configurable refresh rate.
   host exposes thermal zones.
 - **Configurable refresh rate** via a select dialog
   (`200 / 500 / 1000 / 2000 / 5000` ms), persisted across sessions.
+- **Floating overlay** that can sit in any corner or at the top/bottom centre of
+  the screen (six anchors, persisted), like the built-in debug overlay.
+- **Three phosphor themes** (`amber`, `green`, `mono`), persisted.
 - Graceful degradation: any field that can't be read falls back to a safe
   default, so the panel never crashes.
 
@@ -28,10 +31,12 @@ required. Place this directory as a sibling and OpenCode picks it up on restart:
 
 | Command        | Description                                    |
 | -------------- | ---------------------------------------------- |
-| `/system-stats`  | Toggle the stats panel open/closed.            |
+| `/system-stats`  | Toggle the floating stats overlay open/closed. |
 | `/system-stats-refresh` | Choose the refresh rate (dialog preset). |
+| `/system-stats-theme` | Choose the phosphor palette (amber / green / mono). |
+| `/system-stats-position` | Choose the overlay anchor (6 screen positions). |
 
-Both commands are also available from the palette (`<Cmd/Ctrl+P>`).
+All commands are also available from the palette (`<Cmd/Ctrl+P>`).
 
 ## How it works
 
@@ -43,8 +48,9 @@ Both commands are also available from the palette (`<Cmd/Ctrl+P>`).
   - CPU load: two `/proc/stat` samples ~150 ms apart
   - CPU temp: `/sys/class/thermal/thermal_zone*/temp` (null when unavailable,
     e.g. under WSL where only `cooling_device*` exist)
-- **TUI part** (`src/tui.tsx`) polls the RPC on a timer and renders the panel as
-  a `session.panel` contribution.
+- **TUI part** (`src/tui.tsx`) polls the RPC on a timer while the overlay is
+  visible and renders it into the root `app` slot as an absolutely-positioned
+  overlay (six anchors), instead of a host-docked `session.panel`.
 
 ## Development
 

@@ -5,8 +5,11 @@ VRAM (использ + свободно), RAM (использ + свободно
 температуру GPU, температуру CPU. Частота обновления настраивается.
 
 Состояние: **готово и проверено end-to-end на v2.2.5** (панель обновляется сама,
-без повторного `/system-stats`). Запущенный TUI держит старый код плагина в памяти —
-после обновления файла нужен перезапуск TUI (см. «Эксплуатация: перезапуск»).
+без повторного `/system-stats`). С 2026-11-04 панель — **floating overlay** в слоте
+`app` с 6 позициями и 3 фосфорными темами. Запущенный OpenCode держит старый код
+плагина в памяти, а сервис-демон — старый список RPC: после правки `tui.tsx` нужен
+перезапуск TUI, после смены id/набора RPC — перезапуск сервиса
+(см. «Эксплуатация: перезапуск»).
 
 ---
 
@@ -46,6 +49,12 @@ VRAM (использ + свободно), RAM (использ + свободно
       `StatRow` деструктурировал props → Solid читал значения один раз (см. п. 9)
 - [x] Автообновление подтверждено tmux-стендом: два `capture-pane` до/после
       нагрузки — CPU 1% → 53%, RAM 1.53 → 1.64 GB без повторного `/system-stats`
+- [x] **2026-11-04**: найдена причина «панель не отображается, показывает ошибку»
+      — `settings.theme()` (вызов значения Solid-store) валил слот; фикс — `settings.theme`
+- [x] **2026-11-04**: починен выбор темы (`dialog.select.current` должен быть `value`)
+- [x] **2026-11-04**: панель переведена с `session.panel` на floating overlay в слоте
+      `app` (6 позиций, absolute + `zIndex`, как в `devtools-bar.tsx`);
+      команда `/system-stats-position`, опрос RPC только при видимом overlay
 - [x] Финализация bible
 
 ### Решённые причины падений/ошибок (все подтверждены экспериментом)
@@ -115,6 +124,26 @@ VRAM (использ + свободно), RAM (использ + свободно
    то же для `Panel(props)` (`props.width`, `props.latest()` и т.д.).
    Проверено: под нагрузкой CPU 1% → 53%, RAM 1.53 → 1.64 GB без единого
    `/system-stats`; `renderer.requestRender()` не требуется.
+
+10. **`settings.theme()` → `TypeError` → слот падал (2026-11-04)**
+    Симптом: вместо панели — тост об ошибке, панели нет; выбор темы «не работает».
+    Причина: `settings` — **Solid store** (`createStore` в
+    `packages/tui/src/context/storage.tsx`), `theme` это значение-строка, а код
+    вызывал `settings.theme()` → `TypeError: settings.theme is not a function`.
+    `PluginBoundary` (`packages/tui/src/plugin/render.tsx`) ловит бросок в слоте,
+    показывает тост `"{id} crashed in slot {path}: …"` и рендерит `null` — отсюда
+    и «ошибка + пусто». Фикс: читать `settings.theme` (без вызова). Диалог темы
+    падал по той же причине (он вызывает `themeName()`).
+
+11. **`dialog.select.current` — только `value`, не `title`**
+    `applyTheme` передавал `current: THEME_LABEL(themeName())` («Amber phosphor»),
+    а опции имеют `value: "amber"` → подсветка не совпадала ни с одной опцией.
+    Фикс: `current: themeName()`. Тот же инвариант в `applyPosition`.
+
+12. **`session.panel` нельзя позиционировать**
+    Presentation — только `"panel"` (сбоку, при `width >= SESSION_PANEL_SPLIT_MIN_WIDTH`)
+    или `"fullscreen"`; выбора угла/края нет. Фикс: слот `app` + absolute-обёртка
+    (см. «Floating overlay»).
 
 ### Как это отлаживалось (полезно на будущее)
 
@@ -205,8 +234,10 @@ VRAM (использ + свободно), RAM (использ + свободно
 - **Refresh rate**: `context.storage.store` (reactive), интервал пересоздаётся
   при изменении. Пресеты через `context.ui.dialog.select` (200/500/1000/2000/5000 ms).
   Команда смены частоты — `/system-stats-refresh` (`slash.name = "system-stats-refresh"`).
-- **Display**: `session.panel` contribution `system-stats` + команда `system-stats`
-  (palette/slash) для переключения.
+- **Display**: floating overlay в слоте `app` (absolute + `zIndex`, 6 якорей,
+  дефолт `top-right`) + команды `system-stats` (toggle),
+  `system-stats-refresh`, `system-stats-theme`, `system-stats-position`
+  (palette/slash). `session.panel` больше не используется.
 
 ---
 
@@ -220,8 +251,11 @@ VRAM (использ + свободно), RAM (использ + свободно
 - **TUI-половина** (`src/tui.tsx`) — перечитывается при старте TUI. Уже
   запущенный TUI держит старый код в памяти: нужен перезапуск TUI.
 
-**Сейчас:** сервис уже отдаёт 200 (проверено curl'ом с `location`), поэтому
-достаточно перезапустить TUI.
+**Сейчас (2026-11-04):** сервис-демон (pid старше переименования плагина) отвечает
+`400 rpc.unavailable` на `POST /api/rpc/opencode-system-stats/stats` даже с
+правильным `location` — RPC-контракт с этим id в его процессе не зарегистрирован.
+Поэтому нужен **полный перезапуск OpenCode** (сервис + TUI), а не только TUI.
+Проверка после рестарта — чек-лист ниже (ожидается HTTP 200).
 
 ---
 
@@ -305,8 +339,17 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
   `initial` применяется к отсутствующему ключу; сохранённое значение имеет приоритет.
 - **TUI select**: `context.ui.dialog.select({ title, current, options: [{title,value,...}] })`.
   `current` должен совпадать с `value` опции, чтобы подсветить.
-- **TUI panel**: `context.ui.slot({ append: "session.panel", render: (panel) => <Show when={panel.name==="system-stats">...</Show> })`.
+- **TUI panel (host-docked)**: `context.ui.slot({ append: "session.panel", render: (panel) => <Show when={panel.name==="system-stats">...</Show> })`.
   Открытие: `context.ui.panel.open("system-stats")`. panel даёт reactive `name, width, focused` + `close/focus`.
+  Ограничение: `session.panel` умеет только `"panel"` (сбоку) или `"fullscreen"`;
+  свободно позиционировать панель нельзя.
+- **TUI overlay (свободное позиционирование)**: `context.ui.slot({ append: "app", render: () => ... })`
+  + `<box position="absolute" left={0} right={0} top={0} zIndex={2600} .../>`.
+  Слот `app` (`SlotMap["app"] = {}`) монтируется внутри `flexGrow`-колонки главной
+  области (`position="relative"` у предка), поэтому absolute-обёртка накрывает
+  именно main area — тот же приём, что у `devtools-bar.tsx` (`PanelBox`).
+  `justifyContent: flex-start|center|flex-end` даёт 6 якорей. Это единственный
+  способ показать плагин «в разных частях экрана».
 - **TUI keymap**: `context.keymap.layer(() => ({ mode:"global", commands:[{id,title,palette:true,slash:{name}, run}] }))`.
 - **Solid**: `{ Show, createSignal, createEffect, onCleanup } from "solid-js"`.
 - **Solid-реактивность в TUI-панели (критично)**:
@@ -346,15 +389,38 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
   Поддерживается рантаймом OpenTUI (в бинарнике есть таблица `onClick`/`onMouseDown`
   и `dialog.select`). ТРЕБУЕТ терминала с мышью — если курсором не кликают,
   частоту всё ещё меняют командой `/system-stats-refresh`.
-- `props.width` из slot больше не используется для ширины (измеряем по контенту),
-  но оставлен в типе `Panel` ради стабильного интерфейса.
+- `props.width` из slot больше не используется: панель больше **не** `session.panel`,
+  а absolute-overlay в слоте `app`, ширина считается по контенту.
+- `props.width` удалён из типа `Panel` вместе с переходом на overlay.
 
 > **Solid-нюанс для кликов в TUI:** `onClick` на `<text>`/`<box>` работает, но
 > это mouse-событие — нужен mouse-capable terminal. Ключевые горячие клавиши
 > клику по-прежнему не привязаны (OpenTUI клавиатурно-ориентирован).
 
-- slash/palette: `system-stats` — открыть/закрыть панель.
+- slash/palette: `system-stats` — открыть/закрыть overlay.
 - slash/palette: `system-stats-refresh` — сменить частоту обновления.
+- slash/palette: `system-stats-theme` — сменить палитру (amber/green/mono).
+- slash/palette: `system-stats-position` — выбрать якорь overlay.
+
+---
+
+## Floating overlay — 6 позиций (2026-11-04)
+
+По мотивам `packages/tui/src/component/devtools-bar.tsx` (`PanelBox`: absolute +
+`zIndex` + `left/bottom`).
+
+- `Panel` оборачивается в `<box {...anchorProps(position())}>`:
+  `position="absolute"`, `zIndex=2600`, `left=0`, `right=0`, `top` ИЛИ `bottom`,
+  `padding=1`, `flexDirection="row"`, `justifyContent` = flex-start/center/flex-end.
+- `Position` = `top-left | top-center | top-right | bottom-left | bottom-center | bottom-right`,
+  дефолт `top-right`; хранится в storage (`position`) и переключается
+  `/system-stats-position` (`applyPosition`).
+- Видимость — **эфемерный** `createSignal(false)` (`visible`), не в storage:
+  overlay открывается по `/system-stats` и не всплывает сам при старте.
+- Опрос RPC идёт **только пока overlay видим** (`createEffect` трекает
+  `visible()`): скрытая панель не грузит `nvidia-smi`/RPC.
+- `zIndex=2600` выше обычного контента, но диалоги рисует отдельный слой — они
+  всё равно сверху.
 
 ---
 
@@ -393,6 +459,15 @@ curl -s -u "opencode:$P" -X POST \
       (сохранённый пресет подхватывается из storage). — **СДЕЛАНО**: панель
       рисует GPU/RAM/CPU, refresh из storage.
 - [ ] (опц.) Добавить событие `stats`/`emit` вместо polling, если понадобится пуш-модель.
+- [ ] **2026-11-04**: перезапустить OpenCode (и сервис-демон, и TUI). Причины:
+      (1) `opencode serve --service` держит **старый** список RPC — после
+      переименования плагина в `opencode-system-stats` он отвечает
+      `400 rpc.unavailable` (pid сервиса старше каталога/переименования);
+      (2) TUI держит старый код `tui.tsx` в памяти, поэтому фикс
+      `settings.theme` и overlay не подхватятся без рестарта. Сервис из этой
+      сессии не убивать — это завершит текущую сессию.
+- [ ] После рестарта: `/system-stats` → overlay, `/system-stats-position` → угол,
+      `/system-stats-theme` → палитра. Проверить, что тоста об ошибке нет.
 - [x] **Внешний вид панели (2026-11-03)**: компактно + адаптивно. Ширина
       «обнимает» контент (`clamp(32..52)`), паддинг 2→1, строки плотнее.
       Футер кликабелен → открывает селектор частоты (`onClick`, нужен

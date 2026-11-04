@@ -4,8 +4,6 @@ import { Stats } from "./rpc.js"
 import type { Stats as StatsSnapshot } from "./rpc.js"
 import { formatGB } from "./stats.js"
 
-const PANEL_ID = "system-stats"
-
 const PRESETS = [
   { value: 200, label: "200 ms — fastest" },
   { value: 500, label: "500 ms — smooth" },
@@ -44,7 +42,54 @@ const THEMES: Record<ThemeName, { label: string; p: Palette }> = {
   },
 }
 const THEME_NAMES = Object.keys(THEMES) as ThemeName[]
-const THEME_LABEL = (name: ThemeName) => THEMES[name].label
+
+// Where the floating overlay sits on screen. The `app` slot mounts inside a
+// flexGrow column, so an absolutely-positioned wrapper spans the main area and
+// aligns the panel to one of six anchors (corners or top/bottom centre).
+type Position =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right"
+
+const POSITION_LABELS: Record<Position, string> = {
+  "top-left": "Top left",
+  "top-center": "Top center",
+  "top-right": "Top right",
+  "bottom-left": "Bottom left",
+  "bottom-center": "Bottom center",
+  "bottom-right": "Bottom right",
+}
+const POSITION_NAMES = Object.keys(POSITION_LABELS) as Position[]
+const POSITION_OPTIONS = POSITION_NAMES.map((name) => ({
+  title: POSITION_LABELS[name],
+  value: name,
+}))
+
+// Absolute wrapper props for an anchor. Full width (left/right = 0) with a
+// one-cell inset, anchored to the top or bottom edge; `justifyContent`
+// positions the fixed-width panel horizontally. Mirrors the devtools-bar
+// overlay pattern (`position="absolute"` + `zIndex`).
+function anchorProps(position: Position) {
+  const horizontal = position.endsWith("left")
+    ? "flex-start"
+    : position.endsWith("right")
+      ? "flex-end"
+      : "center"
+  const vertical = position.startsWith("top") ? { top: 0 } : { bottom: 0 }
+  return {
+    position: "absolute" as const,
+    zIndex: 2600,
+    left: 0,
+    right: 0,
+    ...vertical,
+    padding: 1,
+    flexDirection: "row" as const,
+    justifyContent: horizontal,
+  }
+}
 
 // Options shared by the `/system-stats-refresh` command and by clicking the
 // panel footer. Kept as a plain list so both call sites stay in sync.
@@ -84,7 +129,8 @@ function applyTheme(
   return context.ui.dialog
     .select({
       title: "System stats theme",
-      current: THEME_LABEL(themeName()),
+      // `current` must match an option `value` (not its title) to highlight.
+      current: themeName(),
       options: THEME_NAMES.map((name) => ({ title: THEMES[name].label, value: name })),
     })
     .then((chosen) => {
@@ -92,6 +138,23 @@ function applyTheme(
         const next = chosen as ThemeName
         if (THEMES[next]) setTheme(next)
       }
+    })
+}
+
+// Open the position selector and persist the chosen anchor.
+function applyPosition(
+  context: ReturnType<typeof usePlugin>,
+  position: () => Position,
+  setPosition: (p: Position) => void,
+) {
+  return context.ui.dialog
+    .select({
+      title: "Stats position",
+      current: position(),
+      options: POSITION_OPTIONS,
+    })
+    .then((chosen) => {
+      if (chosen && POSITION_LABELS[chosen as Position]) setPosition(chosen as Position)
     })
 }
 
@@ -126,15 +189,26 @@ export default Plugin.define({
     // `[state, setState]` where `state` is a reactive store (built-in panels
     // read it as `state.prop`); the second element is the async setter.
     const [settings, setSettings] = context.storage.store("system-stats", {
-      initial: { refreshMs: 1000, theme: "amber" as ThemeName },
+      initial: { refreshMs: 1000, theme: "amber" as ThemeName, position: "top-right" as Position },
     })
-    // Persisted theme name (falls back to the default if the stored record
-    // predates the theme field, e.g. after the storage-key rename).
-    const themeName = (): ThemeName => (settings.theme() as ThemeName | undefined) ?? "amber"
+    // Persisted theme name. `settings` is a reactive Solid store, so `theme` is
+    // read as a property (`settings.theme`), never called — calling it threw
+    // "settings.theme is not a function" and the plugin crashed in its slot.
+    // Falls back to the default if the stored record predates the theme field.
+    const themeName = (): ThemeName => (settings.theme as ThemeName | undefined) ?? "amber"
     const setTheme = (name: ThemeName) =>
       setSettings((draft) => {
         draft.theme = name
       })
+    // Persisted overlay anchor (falls back if the stored record predates it).
+    const position = (): Position => (settings.position as Position | undefined) ?? "top-right"
+    const setPosition = (p: Position) =>
+      setSettings((draft) => {
+        draft.position = p
+      })
+    // Whether the floating overlay is visible. Ephemeral (not persisted): the
+    // panel is opened on demand via /system-stats, like the DebugOverlay.
+    const [visible, setVisible] = createSignal(false)
     // Resolved palette — re-derives whenever the theme changes.
     const palette = () => THEMES[themeName()].p
     const refreshMs = () => {
@@ -232,13 +306,19 @@ export default Plugin.define({
       }
     }
 
-    // Restart the poll timer whenever refreshMs changes; clean up on dispose.
+    // Poll only while the overlay is visible: the panel is opened on demand, so
+    // there is no reason to hammer nvidia-smi (and the RPC) while it is hidden.
+    // Restart the timer whenever refreshMs or visibility changes; clean up on
+    // dispose.
     createEffect(() => {
       const ms = refreshMs()
+      const shown = visible()
       if (timerId) {
         clearInterval(timerId)
         timerId = undefined
       }
+      if (!shown) return
+      void tick() // paint a sample immediately on open
       timerId = setInterval(() => void tick(), ms)
       onCleanup(() => {
         if (timerId) {
@@ -247,8 +327,6 @@ export default Plugin.define({
         }
       })
     })
-
-    void tick() // show a sample immediately on open
 
     // Command: choose the refresh rate via a dialog.
     context.keymap.layer(() => ({
@@ -282,7 +360,23 @@ export default Plugin.define({
       ],
     }))
 
-    // Command: toggle the panel open/closed.
+    // Command: choose the overlay anchor (corner / top-bottom centre).
+    context.keymap.layer(() => ({
+      mode: "global",
+      commands: [
+        {
+          id: "opencode-system-stats.position",
+          title: "Set stats position",
+          palette: true,
+          slash: { name: "system-stats-position" },
+          run: () => {
+            void applyPosition(context, position, setPosition)
+          },
+        },
+      ],
+    }))
+
+    // Command: toggle the floating overlay open/closed.
     context.keymap.layer(() => ({
       mode: "global",
       commands: [
@@ -292,29 +386,27 @@ export default Plugin.define({
           palette: true,
           slash: { name: "system-stats" },
           run: () => {
-            const current = context.ui.panel.current()
-            if (current && current.name === PANEL_ID) {
-              context.ui.panel.close()
-            } else {
-              context.ui.panel.open(PANEL_ID)
-            }
+            setVisible((v) => !v)
           },
         },
       ],
     }))
 
-    // session.panel contribution. Only renders while this panel is selected.
+    // Floating overlay: appended to the root `app` slot so it can sit anywhere
+    // on screen — unlike session.panel, which the host docks or fullscreens.
+    // `Panel` renders an absolutely-positioned wrapper via `anchorProps`.
     context.ui.slot({
-      append: "session.panel",
-      render: (panel) => (
-        <Show when={panel.name === PANEL_ID}>
+      append: "app",
+      render: () => (
+        <Show when={visible()}>
           <Panel
-            width={panel.width}
             latest={latest}
             error={error}
             refreshMs={refreshMs}
+            setRefreshMs={setRefreshMs}
             palette={palette}
             themeName={themeName}
+            position={position}
           />
         </Show>
       ),
@@ -329,19 +421,22 @@ export default Plugin.define({
 // Props are read through the props object (`props.latest()`), never
 // destructured: destructuring reads once and silently freezes the panel.
 function Panel(props: {
-  width: number
   latest: () => StatsSnapshot | null
   error: () => string | null
   refreshMs: () => number
+  setRefreshMs: (ms: number) => void
   palette: () => Palette
   themeName: () => ThemeName
+  position: () => Position
 }) {
   const context = usePlugin()
   const latest = props.latest
   const error = props.error
   const refreshMs = props.refreshMs
+  const setRefreshMs = props.setRefreshMs
   const palette = props.palette
   const themeName = props.themeName
+  const position = props.position
 
   // Inner padding per side and the bordered frame it adds to the width.
   const PADDING = 1 // was 2 — tighter panel
@@ -402,88 +497,93 @@ function Panel(props: {
 
   return (
     <paletteCtx.Provider value={palette}>
+      {/* Floating overlay anchored by `position`: the wrapper is absolute
+          inside the app slot's flexGrow area and aligns the fixed-width panel
+          left / centre / right on the top or bottom edge. */}
+      <box {...anchorProps(position())}>
         <Show
-        // Compare to `null` (not pass the snapshot itself) so the tree is built
-        // once and only its reactive attributes update on each refresh.
-        when={latest() !== null}
-        fallback={
+          // Compare to `null` (not pass the snapshot itself) so the tree is built
+          // once and only its reactive attributes update on each refresh.
+          when={latest() !== null}
+          fallback={
+            <box
+              border
+              borderStyle="double"
+              padding={PADDING}
+              borderColor={palette().border}
+              backgroundColor={palette().bg}
+            >
+              <text fg={palette().muted}>Collecting stats…</text>
+              <Show when={error()}>
+                <text fg={palette().crit}>{error()}</text>
+              </Show>
+            </box>
+          }
+        >
           <box
             border
             borderStyle="double"
             padding={PADDING}
+            width={cols}
             borderColor={palette().border}
             backgroundColor={palette().bg}
+            title={THEMES[themeName()].label}
           >
-            <text fg={palette().muted}>Collecting stats…</text>
-            <Show when={error()}>
-              <text fg={palette().crit}>{error()}</text>
-            </Show>
+            <box flexDirection="column" gap={0} marginY={1}>
+              <StatRow label="GPU" value={latest()!.gpu.name ?? "N/A"} />
+              <StatRow
+                label="  VRAM"
+                value={`${latest()!.gpu.usedMiB} / ${latest()!.gpu.totalMiB} MiB`}
+              />
+              <StatRow
+                label="  Util"
+                value={`${Math.round(latest()!.gpu.utilPct)}%`}
+                accent={severity(latest()!.gpu.utilPct, 80, 95)}
+              />
+              <StatRow
+                label="  Temp"
+                value={fmtTemp(latest()!.gpu.tempC)}
+                accent={severity(latest()!.gpu.tempC, 85, 95)}
+              />
+            </box>
+
+            <box flexDirection="column" gap={0} marginY={1}>
+              <StatRow
+                label="RAM"
+                value={`${formatGB(latest()!.ram.usedBytes)} / ${formatGB(
+                  latest()!.ram.totalBytes,
+                )}`}
+              />
+              <StatRow label="  Free" value={formatGB(latest()!.ram.freeBytes)} />
+            </box>
+
+            <box flexDirection="column" gap={0} marginY={1}>
+              <StatRow
+                label="CPU"
+                value={`${Math.round(latest()!.cpu.loadPct)}%`}
+                accent={severity(latest()!.cpu.loadPct, 80, 95)}
+              />
+              <StatRow
+                label="  Temp"
+                value={fmtTemp(latest()!.cpu.tempC)}
+                accent={severity(latest()!.cpu.tempC, 80, 95)}
+              />
+            </box>
+
+            <text
+              marginY={1}
+              fg={palette().muted}
+              font="dim"
+              title="click to change refresh rate"
+              onClick={() => void applyRefreshRate(context, refreshMs, setRefreshMs)}
+            >
+              <text fg={palette().accent}>● LIVE</text>{" "}·{" "}
+              {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
+              {refreshMs()}ms
+            </text>
           </box>
-        }
-      >
-        <box
-          border
-          borderStyle="double"
-          padding={PADDING}
-          width={cols}
-          borderColor={palette().border}
-          backgroundColor={palette().bg}
-          title={THEMES[themeName()].label}
-        >
-          <box flexDirection="column" gap={0} marginY={1}>
-            <StatRow label="GPU" value={latest()!.gpu.name ?? "N/A"} />
-            <StatRow
-              label="  VRAM"
-              value={`${latest()!.gpu.usedMiB} / ${latest()!.gpu.totalMiB} MiB`}
-            />
-            <StatRow
-              label="  Util"
-              value={`${Math.round(latest()!.gpu.utilPct)}%`}
-              accent={severity(latest()!.gpu.utilPct, 80, 95)}
-            />
-            <StatRow
-              label="  Temp"
-              value={fmtTemp(latest()!.gpu.tempC)}
-              accent={severity(latest()!.gpu.tempC, 85, 95)}
-            />
-          </box>
-  
-          <box flexDirection="column" gap={0} marginY={1}>
-            <StatRow
-              label="RAM"
-              value={`${formatGB(latest()!.ram.usedBytes)} / ${formatGB(
-                latest()!.ram.totalBytes,
-              )}`}
-            />
-            <StatRow label="  Free" value={formatGB(latest()!.ram.freeBytes)} />
-          </box>
-  
-          <box flexDirection="column" gap={0} marginY={1}>
-            <StatRow
-              label="CPU"
-              value={`${Math.round(latest()!.cpu.loadPct)}%`}
-              accent={severity(latest()!.cpu.loadPct, 80, 95)}
-            />
-            <StatRow
-              label="  Temp"
-              value={fmtTemp(latest()!.cpu.tempC)}
-              accent={severity(latest()!.cpu.tempC, 80, 95)}
-            />
-          </box>
-  
-          <text
-            marginY={1}
-            fg={palette().muted}
-            font="dim"
-            title="click to change refresh rate"
-            onClick={() => void applyRefreshRate(context, refreshMs, setRefreshMs)}
-          >
-            <text fg={palette().accent}>● LIVE</text>{" "}·{" "}
-            {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
-            {refreshMs()}ms
-          </text>
-        </box>
         </Show>
+      </box>
     </paletteCtx.Provider>
   )
 }
