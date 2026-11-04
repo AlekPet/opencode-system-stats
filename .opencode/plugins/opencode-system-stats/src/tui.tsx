@@ -397,19 +397,37 @@ export default Plugin.define({
     // `Panel` renders an absolutely-positioned wrapper via `anchorProps`.
     context.ui.slot({
       append: "app",
-      render: () => (
-        <Show when={visible()}>
-          <Panel
-            latest={latest}
-            error={error}
-            refreshMs={refreshMs}
-            setRefreshMs={setRefreshMs}
-            palette={palette}
-            themeName={themeName}
-            position={position}
-          />
-        </Show>
-      ),
+      // The slot renderer is wrapped in a try/catch so an unexpected value that
+      // somehow reaches a `<text>` (Solid throws
+      // "TextNodeRenderable only accepts strings…") is surfaced as a readable
+      // line inside the panel instead of aborting the whole `app` slot with a
+      // modal crash toast. The panel is already string-safe; this is a safety
+      // net that also turns a future crash into a debugging clue.
+      render: () => {
+        try {
+          return (
+            <Show when={visible()}>
+              <Panel
+                latest={latest}
+                error={error}
+                refreshMs={refreshMs}
+                setRefreshMs={setRefreshMs}
+                palette={palette}
+                themeName={themeName}
+                position={position}
+              />
+            </Show>
+          )
+        } catch (err) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : err && typeof err === "object" && "message" in err
+                ? String((err as { message: unknown }).message)
+                : String(err)
+          return <text fg="#ff5555">Stats panel error: {message}</text>
+        }
+      },
     })
   },
 })
