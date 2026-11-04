@@ -1,4 +1,4 @@
-import { Show, createSignal, createEffect, onCleanup } from "solid-js"
+import { Show, createSignal, createEffect, createContext, useContext, onCleanup } from "solid-js"
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import { Stats } from "./rpc.js"
 import type { Stats as StatsSnapshot } from "./rpc.js"
@@ -13,6 +13,38 @@ const PRESETS = [
   { value: 2000, label: "2000 ms — light" },
   { value: 5000, label: "5000 ms — background" },
 ]
+
+// Retro 70s–90s early-computer phosphor palettes. Each theme is self-contained
+// (no dependency on the host OS theme) so the "live terminal" look holds on
+// dark or light hosts alike.
+type ThemeName = "amber" | "green" | "mono"
+
+interface Palette {
+  bg: string
+  accent: string
+  base: string
+  muted: string
+  warn: string
+  crit: string
+  border: string
+}
+
+const THEMES: Record<ThemeName, { label: string; p: Palette }> = {
+  amber: {
+    label: "Amber CRT",
+    p: { bg: "#1a1200", accent: "#ffb000", base: "#ffcc66", muted: "#b37a00", warn: "#ff9500", crit: "#ff5530", border: "#ffb000" },
+  },
+  green: {
+    label: "Green Phosphor",
+    p: { bg: "#001800", accent: "#33ff66", base: "#88ffaa", muted: "#1f9944", warn: "#aaff22", crit: "#ff3355", border: "#33ff66" },
+  },
+  mono: {
+    label: "Mono IBM",
+    p: { bg: "#0a0a0a", accent: "#ffffff", base: "#eeeeee", muted: "#8a8a8a", warn: "#ffff55", crit: "#ff5555", border: "#cccccc" },
+  },
+}
+const THEME_NAMES = Object.keys(THEMES) as ThemeName[]
+const THEME_LABEL = (name: ThemeName) => THEMES[name].label
 
 // Options shared by the `/system-stats-refresh` command and by clicking the
 // panel footer. Kept as a plain list so both call sites stay in sync.
@@ -42,24 +74,50 @@ function applyRefreshRate(
     })
 }
 
+// Open the theme selector dialog and persist the chosen palette.
+// Shared by the palette command and the panel footer's theme switch.
+function applyTheme(
+  context: ReturnType<typeof usePlugin>,
+  themeName: () => ThemeName,
+  setTheme: (name: ThemeName) => void,
+) {
+  return context.ui.dialog
+    .select({
+      title: "System stats theme",
+      current: THEME_LABEL(themeName()),
+      options: THEME_NAMES.map((name) => ({ title: THEMES[name].label, value: name })),
+    })
+    .then((chosen) => {
+      if (chosen) {
+        const next = chosen as ThemeName
+        if (THEMES[next]) setTheme(next)
+      }
+    })
+}
+
 function fmtTemp(c: number | null): string {
   return c == null ? "—" : `${Math.round(c)}°C`
 }
 
 // A single labeled stat row: label (muted) | value (right aligned).
+// Colors come from the active phosphor `palette` (provided by the parent
+// `Panel` via context), so the retro look is identical on dark and light hosts.
 function StatRow(props: {
   label: string
   value: string
   accent?: string
 }) {
-  const context = usePlugin()
+  const palette = useContext(paletteCtx)
   return (
     <box flexDirection="row" alignItems="center" justifyContent="space-between">
-      <text fg={context.theme.text.muted}>{props.label}</text>
-      <text fg={props.accent ?? context.theme.text.base}>{props.value}</text>
+      <text fg={palette().muted}>{props.label}</text>
+      <text fg={props.accent ?? palette().base}>{props.value}</text>
     </box>
   )
 }
+
+// Palette provided to the panel body so `StatRow` can stay presentational.
+const paletteCtx = createContext<() => Palette>()
 
 export default Plugin.define({
   id: "opencode-system-stats.tui",
@@ -68,8 +126,17 @@ export default Plugin.define({
     // `[state, setState]` where `state` is a reactive store (built-in panels
     // read it as `state.prop`); the second element is the async setter.
     const [settings, setSettings] = context.storage.store("system-stats", {
-      initial: { refreshMs: 1000 },
+      initial: { refreshMs: 1000, theme: "amber" as ThemeName },
     })
+    // Persisted theme name (falls back to the default if the stored record
+    // predates the theme field, e.g. after the storage-key rename).
+    const themeName = (): ThemeName => (settings.theme() as ThemeName | undefined) ?? "amber"
+    const setTheme = (name: ThemeName) =>
+      setSettings((draft) => {
+        draft.theme = name
+      })
+    // Resolved palette — re-derives whenever the theme changes.
+    const palette = () => THEMES[themeName()].p
     const refreshMs = () => {
       const ms = Number(settings.refreshMs)
       // Never hand `setInterval` a non-positive/NaN delay: `undefined` is
@@ -199,6 +266,22 @@ export default Plugin.define({
       ],
     }))
 
+    // Command: choose the theme palette via a dialog.
+    context.keymap.layer(() => ({
+      mode: "global",
+      commands: [
+        {
+          id: "opencode-system-stats.theme",
+          title: "Set stats theme",
+          palette: true,
+          slash: { name: "system-stats-theme" },
+          run: () => {
+            void applyTheme(context, themeName, setTheme)
+          },
+        },
+      ],
+    }))
+
     // Command: toggle the panel open/closed.
     context.keymap.layer(() => ({
       mode: "global",
@@ -230,6 +313,8 @@ export default Plugin.define({
             latest={latest}
             error={error}
             refreshMs={refreshMs}
+            palette={palette}
+            themeName={themeName}
           />
         </Show>
       ),
@@ -248,12 +333,15 @@ function Panel(props: {
   latest: () => StatsSnapshot | null
   error: () => string | null
   refreshMs: () => number
+  palette: () => Palette
+  themeName: () => ThemeName
 }) {
   const context = usePlugin()
-  const theme = context.theme
   const latest = props.latest
   const error = props.error
   const refreshMs = props.refreshMs
+  const palette = props.palette
+  const themeName = props.themeName
 
   // Inner padding per side and the bordered frame it adds to the width.
   const PADDING = 1 // was 2 — tighter panel
@@ -282,10 +370,10 @@ function Panel(props: {
     warn: number,
     crit: number,
   ): string | undefined => {
-    if (value == null) return theme.text.muted
-    if (value >= crit) return "#ff5555"
-    if (value >= warn) return "#ffb000"
-    return theme.text.base
+    if (value == null) return palette().muted
+    if (value >= crit) return palette().crit
+    if (value >= warn) return palette().warn
+    return palette().base
   }
 
   // Width hugs the widest rendered line so the panel never wastes horizontal
@@ -295,7 +383,6 @@ function Panel(props: {
     const snap = latest()
     if (!snap) return MIN_COLS
     const lines = [
-      "System Stats",
       `GPU    ${snap.gpu.name ?? "N/A"}`,
       `  VRAM ${snap.gpu.usedMiB} / ${snap.gpu.totalMiB} MiB`,
       `  Util ${Math.round(snap.gpu.utilPct)}%`,
@@ -314,82 +401,89 @@ function Panel(props: {
   )
 
   return (
-    <Show
-      // Compare to `null` (not pass the snapshot itself) so the tree is built
-      // once and only its reactive attributes update on each refresh.
-      when={latest() !== null}
-      fallback={
-        <box border borderStyle="rounded" padding={PADDING} backgroundColor="#1e1e1e">
-          <text fg={theme.text.muted}>Collecting stats…</text>
-          <Show when={error()}>
-            <text fg="#ff5555">{error()}</text>
-          </Show>
-        </box>
-      }
-    >
-      <box
-        border
-        borderStyle="rounded"
-        padding={PADDING}
-        width={cols}
-        backgroundColor="#1e1e1e"
+    <paletteCtx.Provider value={palette}>
+        <Show
+        // Compare to `null` (not pass the snapshot itself) so the tree is built
+        // once and only its reactive attributes update on each refresh.
+        when={latest() !== null}
+        fallback={
+          <box
+            border
+            borderStyle="double"
+            padding={PADDING}
+            borderColor={palette().border}
+            backgroundColor={palette().bg}
+          >
+            <text fg={palette().muted}>Collecting stats…</text>
+            <Show when={error()}>
+              <text fg={palette().crit}>{error()}</text>
+            </Show>
+          </box>
+        }
       >
-        <text font="bold" fg={theme.text.accent}>
-          System Stats
-        </text>
-
-        <box flexDirection="column" gap={0} marginY={1}>
-          <StatRow label="GPU" value={latest()!.gpu.name ?? "N/A"} />
-          <StatRow
-            label="  VRAM"
-            value={`${latest()!.gpu.usedMiB} / ${latest()!.gpu.totalMiB} MiB`}
-          />
-          <StatRow
-            label="  Util"
-            value={`${Math.round(latest()!.gpu.utilPct)}%`}
-            accent={severity(latest()!.gpu.utilPct, 80, 95)}
-          />
-          <StatRow
-            label="  Temp"
-            value={fmtTemp(latest()!.gpu.tempC)}
-            accent={severity(latest()!.gpu.tempC, 85, 95)}
-          />
-        </box>
-
-        <box flexDirection="column" gap={0} marginY={1}>
-          <StatRow
-            label="RAM"
-            value={`${formatGB(latest()!.ram.usedBytes)} / ${formatGB(
-              latest()!.ram.totalBytes,
-            )}`}
-          />
-          <StatRow label="  Free" value={formatGB(latest()!.ram.freeBytes)} />
-        </box>
-
-        <box flexDirection="column" gap={0} marginY={1}>
-          <StatRow
-            label="CPU"
-            value={`${Math.round(latest()!.cpu.loadPct)}%`}
-            accent={severity(latest()!.cpu.loadPct, 80, 95)}
-          />
-          <StatRow
-            label="  Temp"
-            value={fmtTemp(latest()!.cpu.tempC)}
-            accent={severity(latest()!.cpu.tempC, 80, 95)}
-          />
-        </box>
-
-        <text
-          marginY={1}
-          fg={theme.text.muted}
-          font="dim"
-          title="click to change refresh rate"
-          onClick={() => void applyRefreshRate(context, refreshMs, setRefreshMs)}
+        <box
+          border
+          borderStyle="double"
+          padding={PADDING}
+          width={cols}
+          borderColor={palette().border}
+          backgroundColor={palette().bg}
+          title={THEMES[themeName()].label}
         >
-          {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
-          {refreshMs()}ms
-        </text>
-      </box>
-    </Show>
+          <box flexDirection="column" gap={0} marginY={1}>
+            <StatRow label="GPU" value={latest()!.gpu.name ?? "N/A"} />
+            <StatRow
+              label="  VRAM"
+              value={`${latest()!.gpu.usedMiB} / ${latest()!.gpu.totalMiB} MiB`}
+            />
+            <StatRow
+              label="  Util"
+              value={`${Math.round(latest()!.gpu.utilPct)}%`}
+              accent={severity(latest()!.gpu.utilPct, 80, 95)}
+            />
+            <StatRow
+              label="  Temp"
+              value={fmtTemp(latest()!.gpu.tempC)}
+              accent={severity(latest()!.gpu.tempC, 85, 95)}
+            />
+          </box>
+  
+          <box flexDirection="column" gap={0} marginY={1}>
+            <StatRow
+              label="RAM"
+              value={`${formatGB(latest()!.ram.usedBytes)} / ${formatGB(
+                latest()!.ram.totalBytes,
+              )}`}
+            />
+            <StatRow label="  Free" value={formatGB(latest()!.ram.freeBytes)} />
+          </box>
+  
+          <box flexDirection="column" gap={0} marginY={1}>
+            <StatRow
+              label="CPU"
+              value={`${Math.round(latest()!.cpu.loadPct)}%`}
+              accent={severity(latest()!.cpu.loadPct, 80, 95)}
+            />
+            <StatRow
+              label="  Temp"
+              value={fmtTemp(latest()!.cpu.tempC)}
+              accent={severity(latest()!.cpu.tempC, 80, 95)}
+            />
+          </box>
+  
+          <text
+            marginY={1}
+            fg={palette().muted}
+            font="dim"
+            title="click to change refresh rate"
+            onClick={() => void applyRefreshRate(context, refreshMs, setRefreshMs)}
+          >
+            <text fg={palette().accent}>● LIVE</text>{" "}·{" "}
+            {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
+            {refreshMs()}ms
+          </text>
+        </box>
+        </Show>
+    </paletteCtx.Provider>
   )
 }
