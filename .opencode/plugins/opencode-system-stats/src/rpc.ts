@@ -27,7 +27,7 @@ export interface Stats {
  * `id` only identifies the contract itself.
  */
 export const Stats = Rpc.define({
-  id: "opencode-view-stats",
+  id: "opencode-system-stats",
   methods: {
     stats: {
       // `stats` takes no arguments, but `input` must still be present: the

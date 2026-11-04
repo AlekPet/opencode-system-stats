@@ -1,11 +1,11 @@
-# Project Bible — opencode-view-stats
+# Project Bible — opencode-system-stats
 
 Реал-тайм плагин для OpenCode (TUI), показывающий в терминале:
 VRAM (использ + свободно), RAM (использ + свободно), загрузку CPU,
 температуру GPU, температуру CPU. Частота обновления настраивается.
 
 Состояние: **готово и проверено end-to-end на v2.2.5** (панель обновляется сама,
-без повторного `/view-stats`). Запущенный TUI держит старый код плагина в памяти —
+без повторного `/system-stats`). Запущенный TUI держит старый код плагина в памяти —
 после обновления файла нужен перезапуск TUI (см. «Эксплуатация: перезапуск»).
 
 ---
@@ -35,17 +35,17 @@ VRAM (использ + свободно), RAM (использ + свободно
 - [x] Статика проверена: `collectStats()` на хосте отдаёт живой снимок; esbuild-транспиляция всех 4 файлов чистая
 - [x] RPC-контракт доведён до рабочего вида (3 бага, см. ниже)
 - [x] Локальный плагин обнаружен: `opencode plugin list` показывает `local`
-- [x] Загрузка плагина проверена: `opencode run ... --standalone` → `msg="loading plugin" id=...opencode-view-stats`, без `failed to load plugin`
-- [x] RPC проверен напрямую: `POST /api/rpc/opencode-view-stats/stats` с `{"input":{}}` → **HTTP 200** и живой JSON
+- [x] Загрузка плагина проверена: `opencode run ... --standalone` → `msg="loading plugin" id=...opencode-system-stats`, без `failed to load plugin`
+- [x] RPC проверен напрямую: `POST /api/rpc/opencode-system-stats/stats` с `{"input":{}}` → **HTTP 200** и живой JSON
 - [x] Найдены и исправлены 3 бага TUI-стороны: отсутствие `location` в вызове;
       нереактивное чтение снапшота в `Panel`; вызов сеттера `storage.store` как геттера
       (→ `setInterval(fn, undefined)` → шторм ~890 RPC/сек)
 - [x] TUI-сторона проверена на изолированном стенде (сервер с cwd=`$HOME`):
       `http.status=200`, панель рисует GPU/RAM/CPU, ошибок 0
-- [x] Найден и исправлен баг «панель не обновляется без `/view-stats`»:
+- [x] Найден и исправлен баг «панель не обновляется без `/system-stats`»:
       `StatRow` деструктурировал props → Solid читал значения один раз (см. п. 9)
 - [x] Автообновление подтверждено tmux-стендом: два `capture-pane` до/после
-      нагрузки — CPU 1% → 53%, RAM 1.53 → 1.64 GB без повторного `/view-stats`
+      нагрузки — CPU 1% → 53%, RAM 1.53 → 1.64 GB без повторного `/system-stats`
 - [x] Финализация bible
 
 ### Решённые причины падений/ошибок (все подтверждены экспериментом)
@@ -73,7 +73,7 @@ VRAM (использ + свободно), RAM (использ + свободно
 4. **`rpc.unavailable` на уже запущенном сервере**
    Долгоживущий сервер (`opencode serve --service`, pid 1290) поднялся **до** появления
    каталога плагина и не перечитывает project-плагины, созданные позже.
-   Симптом: `{"_tag":"RpcError","type":"rpc.unavailable","message":"RPC is unavailable: opencode-view-stats"}`
+   Симптом: `{"_tag":"RpcError","type":"rpc.unavailable","message":"RPC is unavailable: opencode-system-stats"}`
    (HTTP 400). Лечится рестартом OpenCode; свежий сервер грузит плагин и отдаёт 200.
 
 5. **TUI-вызов RPC без `location` → 400 `rpc.unavailable`**
@@ -103,7 +103,7 @@ VRAM (использ + свободно), RAM (использ + свободно
    (перебор только при ошибке `rpc.unavailable`).
 
 9. **Деструктуризация props убивает реактивность → панель «замирает»**
-   Симптом: данные меняются только после повторного `/view-stats`; таймер при
+   Симптом: данные меняются только после повторного `/system-stats`; таймер при
    этом работает (в отладке `tick-ok` каждые 500 мс, `createEffect` на `latest()`
    срабатывает на каждый снапшот), а на экране — старые цифры.
    Причина: `function StatRow({ label, value, accent })` — в Solid деструктуризация
@@ -114,7 +114,7 @@ VRAM (использ + свободно), RAM (использ + свободно
    Фикс: `function StatRow(props)` + `props.label` / `props.value` / `props.accent`;
    то же для `Panel(props)` (`props.width`, `props.latest()` и т.д.).
    Проверено: под нагрузкой CPU 1% → 53%, RAM 1.53 → 1.64 GB без единого
-   `/view-stats`; `renderer.requestRender()` не требуется.
+   `/system-stats`; `renderer.requestRender()` не требуется.
 
 ### Как это отлаживалось (полезно на будущее)
 
@@ -122,7 +122,7 @@ VRAM (использ + свободно), RAM (использ + свободно
   ```bash
   P=$(node -e 'process.stdout.write(require("/home/alekpet/.config/opencode/service.json").password)')
   curl -s -u "opencode:$P" -X POST \
-    http://127.0.0.1:4096/api/rpc/opencode-view-stats/stats \
+    http://127.0.0.1:4096/api/rpc/opencode-system-stats/stats \
     -H 'content-type: application/json' --data '{"input":{}}'
   ```
   **Логин всегда `opencode`** (зашит в `ServerAuthConfig.configLayer`), а не значение
@@ -137,7 +137,7 @@ VRAM (использ + свободно), RAM (использ + свободно
   (строка `?location=/abs/path` → `InvalidRequestError ... at ["location"]`).
 - **Отладка TUI-плагина**: stdout/stderr TUI занят рендерером, поэтому писать
   диагностику в файл из `setup()`/таймера:
-  `require("node:fs").appendFileSync("/tmp/view-stats-debug.log", msg + "\n")`.
+  `require("node:fs").appendFileSync("/tmp/system-stats-debug.log", msg + "\n")`.
   Так были пойманы `refreshMs=undefined` и смена `location`.
 - **Изолированный стенд** (воспроизводит сервис-демон): сервер с cwd=`$HOME`,
   TUI — в каталоге проекта:
@@ -147,17 +147,17 @@ VRAM (использ + свободно), RAM (использ + свободно
   cd <project> && OPENCODE_SERVER_PASSWORD=testpass123 opencode \
     --server http://127.0.0.1:4110 --log-level debug
   ```
-  В логе сервера видно `http.status` для `/api/rpc/opencode-view-stats/stats`
+  В логе сервера видно `http.status` для `/api/rpc/opencode-system-stats/stats`
   (`200` — норма, `499` — клиент оборвал запрос при убийстве TUI).
 - **Проверка панели без глаз (tmux)**: TUI пишет кадры в перенаправленный stdout;
-  команду можно отправить через `tmux send-keys -l "/view-stats"` + `Enter`,
+  команду можно отправить через `tmux send-keys -l "/system-stats"` + `Enter`,
   а затем grep'ать ANSI-stripped вывод на `System Stats`/`VRAM`.
   Рабочий рецепт:
   ```bash
   tmux new-session -d -s vsverify -x 180 -y 55 \
     "opencode -s <sessionID>"
   sleep 12
-  tmux send-keys -t vsverify -l "/view-stats"; sleep 0.4
+  tmux send-keys -t vsverify -l "/system-stats"; sleep 0.4
   tmux send-keys -t vsverify Enter          # именно Enter, НЕ "send-keys -v"
   sleep 3
   tmux capture-pane -p -t vsverify > /tmp/t0.txt
@@ -185,17 +185,17 @@ VRAM (использ + свободно), RAM (использ + свободно
 
 ## Architecture (решение)
 
-Локальный плагин под `.opencode/plugins/opencode-view-stats/` (авто-загрузка,
+Локальный плагин под `.opencode/plugins/opencode-system-stats/` (авто-загрузка,
 без конфига). Структура:
 
 ```
-.opencode/plugins/opencode-view-stats/
+.opencode/plugins/opencode-system-stats/
 ├── package.json          # exports: "." -> src/index.ts (server), "./tui" -> src/tui.tsx, "./rpc" -> src/rpc.ts
 ├── tsconfig.json
 ├── README.md
 └── src/
-    ├── index.ts          # server: Plugin.define(id="opencode-view-stats"), регистрирует RPC stats
-    ├── rpc.ts            # Rpc.define(id="opencode-view-stats"), метод stats (input + output + events)
+    ├── index.ts          # server: Plugin.define(id="opencode-system-stats"), регистрирует RPC stats
+    ├── rpc.ts            # Rpc.define(id="opencode-system-stats"), метод stats (input + output + events)
     ├── stats.ts          # Node: сбор данных (nvidia-smi, /proc/meminfo, /proc/stat, thermal)
     └── tui.tsx           # TUI: опрос RPC по таймеру, рендер панели + команды
 ```
@@ -204,8 +204,8 @@ VRAM (использ + свободно), RAM (использ + свободно
   (`ram`/`cpu`/`gpu`/`collectedAt`), `events: {}`.
 - **Refresh rate**: `context.storage.store` (reactive), интервал пересоздаётся
   при изменении. Пресеты через `context.ui.dialog.select` (200/500/1000/2000/5000 ms).
-  Команда смены частоты — `/view-stats-refresh` (`slash.name = "view-stats-refresh"`).
-- **Display**: `session.panel` contribution `view-stats` + команда `view-stats`
+  Команда смены частоты — `/system-stats-refresh` (`slash.name = "system-stats-refresh"`).
+- **Display**: `session.panel` contribution `system-stats` + команда `system-stats`
   (palette/slash) для переключения.
 
 ---
@@ -305,8 +305,8 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
   `initial` применяется к отсутствующему ключу; сохранённое значение имеет приоритет.
 - **TUI select**: `context.ui.dialog.select({ title, current, options: [{title,value,...}] })`.
   `current` должен совпадать с `value` опции, чтобы подсветить.
-- **TUI panel**: `context.ui.slot({ append: "session.panel", render: (panel) => <Show when={panel.name==="view-stats">...</Show> })`.
-  Открытие: `context.ui.panel.open("view-stats")`. panel даёт reactive `name, width, focused` + `close/focus`.
+- **TUI panel**: `context.ui.slot({ append: "session.panel", render: (panel) => <Show when={panel.name==="system-stats">...</Show> })`.
+  Открытие: `context.ui.panel.open("system-stats")`. panel даёт reactive `name, width, focused` + `close/focus`.
 - **TUI keymap**: `context.keymap.layer(() => ({ mode:"global", commands:[{id,title,palette:true,slash:{name}, run}] }))`.
 - **Solid**: `{ Show, createSignal, createEffect, onCleanup } from "solid-js"`.
 - **Solid-реактивность в TUI-панели (критично)**:
@@ -330,7 +330,7 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
 
 ## UI / внешний вид панели (2026-11-03)
 
-Панель `view-stats` сделана **компактной и адаптивной**:
+Панель `system-stats` сделана **компактной и адаптивной**:
 
 - **Ширина «обнимает» самый широкий текст**, а не фиксированный диапазон.
   `contentCols()` измеряет длину каждой строки (заголовок + строки статистики +
@@ -341,11 +341,11 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
 - **Паддинг уменьшен с 2 до 1**, строки внутри секций стоят плотнее
   (`gap={0}`), секции разделены одной пустой строкой (`marginY={1}`).
 - **Футер кликабелен**: `onClick` на `<text>` открывает тот же floating-select
-  частоты, что и команда `/view-stats-refresh` (вынесено в общий
+  частоты, что и команда `/system-stats-refresh` (вынесено в общий
   `applyRefreshRate(context, refreshMs, setRefreshMs)` + `REFRESH_OPTIONS`).
   Поддерживается рантаймом OpenTUI (в бинарнике есть таблица `onClick`/`onMouseDown`
   и `dialog.select`). ТРЕБУЕТ терминала с мышью — если курсором не кликают,
-  частоту всё ещё меняют командой `/view-stats-refresh`.
+  частоту всё ещё меняют командой `/system-stats-refresh`.
 - `props.width` из slot больше не используется для ширины (измеряем по контенту),
   но оставлен в типе `Panel` ради стабильного интерфейса.
 
@@ -353,8 +353,8 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
 > это mouse-событие — нужен mouse-capable terminal. Ключевые горячие клавиши
 > клику по-прежнему не привязаны (OpenTUI клавиатурно-ориентирован).
 
-- slash/palette: `view-stats` — открыть/закрыть панель.
-- slash/palette: `view-stats-refresh` — сменить частоту обновления.
+- slash/palette: `system-stats` — открыть/закрыть панель.
+- slash/palette: `system-stats-refresh` — сменить частоту обновления.
 
 ---
 
@@ -362,17 +362,17 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
 
 ```bash
 # 1. Плагин виден
-opencode plugin list | grep opencode-view-stats
+opencode plugin list | grep opencode-system-stats
 
 # 2. Загрузка без падений (в логе не должно быть "failed to load plugin")
-cd /mnt/e/AI_Tools/projects/opencode-view-stats
+cd /mnt/e/AI_Tools/projects/opencode-system-stats
 opencode run "ping" --standalone --log-level trace
-grep -a "loading plugin" ~/.local/share/opencode/log/opencode.log | grep view-stats
+grep -a "loading plugin" ~/.local/share/opencode/log/opencode.log | grep system-stats
 
 # 3. RPC отвечает 200 (важно: с location!)
 P=$(node -e 'process.stdout.write(require("/home/alekpet/.config/opencode/service.json").password)')
 curl -s -u "opencode:$P" -X POST \
-  "http://127.0.0.1:4096/api/rpc/opencode-view-stats/stats?location%5Bdirectory%5D=/mnt/e/AI_Tools/projects/opencode-view-stats" \
+  "http://127.0.0.1:4096/api/rpc/opencode-system-stats/stats?location%5Bdirectory%5D=/mnt/e/AI_Tools/projects/opencode-system-stats" \
   -H 'content-type: application/json' --data '{"input":{}}'
 ```
 
@@ -387,22 +387,22 @@ curl -s -u "opencode:$P" -X POST \
 
 - [x] Пользователю: перезапустить TUI (сервер уже отвечает 200, но запущенный
       экземпляр TUI держит старый код плагина в памяти и продолжает слать
-      ~890 запросов/сек). — **СДЕЛANO**: после рестарта TUI панель `view-stats`
+      ~890 запросов/сек). — **СДЕЛANO**: после рестарта TUI панель `system-stats`
       отрисовалась живыми данными.
-- [x] После рестарта открыть панель `view-stats` и проверить частоту
+- [x] После рестарта открыть панель `system-stats` и проверить частоту
       (сохранённый пресет подхватывается из storage). — **СДЕЛАНО**: панель
       рисует GPU/RAM/CPU, refresh из storage.
 - [ ] (опц.) Добавить событие `stats`/`emit` вместо polling, если понадобится пуш-модель.
 - [x] **Внешний вид панели (2026-11-03)**: компактно + адаптивно. Ширина
       «обнимает» контент (`clamp(32..52)`), паддинг 2→1, строки плотнее.
       Футер кликабелен → открывает селектор частоты (`onClick`, нужен
-      terminal с мышью; для клавиатуры — `/view-stats-refresh`). Подробности в
+      terminal с мышью; для клавиатуры — `/system-stats-refresh`). Подробности в
       разделе «UI / внешний вид панели». **Требует перезапуска TUI** для
       отображения (запущенный TUI держит старый код в памяти).
 - [ ] После перезапуска TUI проверить: (1) панель не «разливается» на широких
       окнах, (2) футер по клику открывает селектор частоты.
 
-### Почему панель «обновлялась только по /view-stats» — итог (2026-11-03)
+### Почему панель «обновлялась только по /system-stats» — итог (2026-11-03)
 
 Причин было **две**, и вторая маскировала первую:
 
@@ -413,10 +413,10 @@ curl -s -u "opencode:$P" -X POST \
    цифр уже после того, как таймер заработал. В Solid `function StatRow({ value })`
    читает prop один раз: текстовые узлы навсегда остаются с первым значением.
    Поэтому `tick-ok` шёл каждые 500 мс, `createEffect` на `latest()` срабатывал,
-   а на экране были старые числа до повторного `/view-stats` (который
+   а на экране были старые числа до повторного `/system-stats` (который
    перемонтировал панель и заново читал props).
 
-Фикс и доказательство — п. 9 выше. Проверка: без повторного `/view-stats`
+Фикс и доказательство — п. 9 выше. Проверка: без повторного `/system-stats`
 CPU 1% → 53%, RAM 1.53 → 1.64 GB под нагрузкой. `renderer.requestRender()`
 для этого не нужен — хватает правильного чтения props.
 

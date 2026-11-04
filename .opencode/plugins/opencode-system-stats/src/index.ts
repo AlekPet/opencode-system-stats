@@ -3,7 +3,7 @@ import { Stats } from "./rpc.js"
 import { collectStats } from "./stats.js"
 
 export default Plugin.define({
-  id: "opencode-view-stats",
+  id: "opencode-system-stats",
   async setup(ctx) {
     await ctx.rpc.register(Stats, {
       stats: async (_input, context) => {

@@ -1,4 +1,4 @@
-# opencode-view-stats
+# opencode-system-stats
 
 A local [OpenCode](https://opencode.ai) plugin that renders a real-time system
 stats panel (VRAM, RAM, CPU load, GPU/CPU temperature) directly in the OpenCode
@@ -21,15 +21,15 @@ Local plugins under `.opencode/plugins/` are auto-loaded — no configuration
 required. Place this directory as a sibling and OpenCode picks it up on restart:
 
 ```
-<project>/.opencode/plugins/opencode-view-stats/   ← this repo
+<project>/.opencode/plugins/opencode-system-stats/   ← this repo
 ```
 
 ## Usage
 
 | Command        | Description                                    |
 | -------------- | ---------------------------------------------- |
-| `/view-stats`  | Toggle the stats panel open/closed.            |
-| `/view-stats-refresh` | Choose the refresh rate (dialog preset). |
+| `/system-stats`  | Toggle the stats panel open/closed.            |
+| `/system-stats-refresh` | Choose the refresh rate (dialog preset). |
 
 Both commands are also available from the palette (`<Cmd/Ctrl+P>`).
 
@@ -49,7 +49,7 @@ Both commands are also available from the palette (`<Cmd/Ctrl+P>`).
 ## Development
 
 ```bash
-cd .opencode/plugins/opencode-view-stats
+cd .opencode/plugins/opencode-system-stats
 npx tsc --noEmit      # type-check (uses tsconfig.json)
 ```
 

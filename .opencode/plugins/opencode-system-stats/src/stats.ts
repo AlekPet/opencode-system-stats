@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import type { Stats } from "./rpc.js"
 
 /**
- * Host-side data collection for the view-stats plugin.
+ * Host-side data collection for the system-stats plugin.
  *
  * Every collector is defensive: on any failure it returns a safe fallback so the
  * panel keeps rendering. This WSL host has no thermal zones and no lm-sensors, so

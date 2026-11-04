@@ -4,7 +4,7 @@ import { Stats } from "./rpc.js"
 import type { Stats as StatsSnapshot } from "./rpc.js"
 import { formatGB } from "./stats.js"
 
-const PANEL_ID = "view-stats"
+const PANEL_ID = "system-stats"
 
 const PRESETS = [
   { value: 200, label: "200 ms — fastest" },
@@ -14,7 +14,7 @@ const PRESETS = [
   { value: 5000, label: "5000 ms — background" },
 ]
 
-// Options shared by the `/view-stats-refresh` command and by clicking the
+// Options shared by the `/system-stats-refresh` command and by clicking the
 // panel footer. Kept as a plain list so both call sites stay in sync.
 const REFRESH_OPTIONS = PRESETS.map((p) => ({
   title: p.label,
@@ -62,12 +62,12 @@ function StatRow(props: {
 }
 
 export default Plugin.define({
-  id: "opencode-view-stats.tui",
+  id: "opencode-system-stats.tui",
   async setup(context) {
     // Persisted, reactive refresh interval (ms). `storage.store` returns
     // `[state, setState]` where `state` is a reactive store (built-in panels
     // read it as `state.prop`); the second element is the async setter.
-    const [settings, setSettings] = context.storage.store("view-stats", {
+    const [settings, setSettings] = context.storage.store("system-stats", {
       initial: { refreshMs: 1000 },
     })
     const refreshMs = () => {
@@ -188,10 +188,10 @@ export default Plugin.define({
       mode: "global",
       commands: [
         {
-          id: "opencode-view-stats.refresh",
+          id: "opencode-system-stats.refresh",
           title: "Set stats refresh rate",
           palette: true,
-          slash: { name: "view-stats-refresh" },
+          slash: { name: "system-stats-refresh" },
           run: () => {
             void applyRefreshRate(context, refreshMs, setRefreshMs)
           },
@@ -204,10 +204,10 @@ export default Plugin.define({
       mode: "global",
       commands: [
         {
-          id: "opencode-view-stats.toggle",
+          id: "opencode-system-stats.toggle",
           title: "Toggle system stats",
           palette: true,
-          slash: { name: "view-stats" },
+          slash: { name: "system-stats" },
           run: () => {
             const current = context.ui.panel.current()
             if (current && current.name === PANEL_ID) {
