@@ -438,6 +438,24 @@ function Panel(props: {
   const themeName = props.themeName
   const position = props.position
 
+  // Helper to safely get nested properties with fallbacks
+  const safeGet = (obj: any, path: string, fallback: any = "—") => {
+    try {
+      return path.split('.').reduce((current, key) => current?.[key] ?? fallback, obj)
+    } catch {
+      return fallback
+    }
+  }
+
+  // Helper to safely get nested properties with null fallback
+  const safeGetNull = (obj: any, path: string) => {
+    try {
+      return path.split('.').reduce((current, key) => current?.[key], obj)
+    } catch {
+      return null
+    }
+  }
+
   // Inner padding per side and the bordered frame it adds to the width.
   const PADDING = 1 // was 2 — tighter panel
   const FRAME = 2 // left + right border
@@ -471,6 +489,12 @@ function Panel(props: {
     return palette().base
   }
 
+  // Safely convert any value to string, handling null/undefined properly
+  const safeString = (value: unknown): string => {
+    if (value === null || value === undefined) return "—"
+    return String(value)
+  }
+
   // Width hugs the widest rendered line so the panel never wastes horizontal
   // space and still wraps gracefully on a tiny window. Each glyph is one cell
   // in the monospace renderer, so string length is a good proxy.
@@ -478,15 +502,15 @@ function Panel(props: {
     const snap = latest()
     if (!snap) return MIN_COLS
     const lines = [
-      `GPU    ${snap.gpu.name ?? "N/A"}`,
-      `  VRAM ${snap.gpu.usedMiB} / ${snap.gpu.totalMiB} MiB`,
-      `  Util ${Math.round(snap.gpu.utilPct)}%`,
-      `  Temp ${fmtTemp(snap.gpu.tempC)}`,
-      `RAM    ${formatGB(snap.ram.usedBytes)} / ${formatGB(snap.ram.totalBytes)}`,
-      `  Free ${formatGB(snap.ram.freeBytes)}`,
-      `CPU    ${Math.round(snap.cpu.loadPct)}%`,
-      `  Temp ${fmtTemp(snap.cpu.tempC)}`,
-      `обновлено ${updatedLabel() ?? "—"} · refresh ${refreshMs()}ms`,
+      `GPU    ${safeString(snap.gpu?.name)}`,
+      `  VRAM ${safeString(snap.gpu?.usedMiB)} / ${safeString(snap.gpu?.totalMiB)} MiB`,
+      `  Util ${Math.round(snap.gpu?.utilPct ?? 0)}%`,
+      `  Temp ${fmtTemp(snap.gpu?.tempC)}`,
+      `RAM    ${formatGB(snap.ram?.usedBytes)} / ${formatGB(snap.ram?.totalBytes)}`,
+      `  Free ${formatGB(snap.ram?.freeBytes)}`,
+      `CPU    ${Math.round(snap.cpu?.loadPct ?? 0)}%`,
+      `  Temp ${fmtTemp(snap.cpu?.tempC)}`,
+      `обновлено ${updatedLabel() ?? "—"} · refresh ${safeString(refreshMs())}ms`,
     ]
     return Math.max(MIN_COLS, ...lines.map((l) => l.length))
   }
@@ -527,46 +551,46 @@ function Panel(props: {
             width={cols}
             borderColor={palette().border}
             backgroundColor={palette().bg}
-            title={THEMES[themeName()].label}
+            title={safeString(THEMES[themeName()].label)}
           >
             <box flexDirection="column" gap={0} marginY={1}>
-              <StatRow label="GPU" value={latest()!.gpu.name ?? "N/A"} />
+              <StatRow label="GPU" value={safeString(safeGet(latest(), "gpu.name"))} />
               <StatRow
                 label="  VRAM"
-                value={`${latest()!.gpu.usedMiB} / ${latest()!.gpu.totalMiB} MiB`}
+                value={`${safeString(safeGet(latest(), "gpu.usedMiB"))} / ${safeString(safeGet(latest(), "gpu.totalMiB"))} MiB`}
               />
               <StatRow
                 label="  Util"
-                value={`${Math.round(latest()!.gpu.utilPct)}%`}
-                accent={severity(latest()!.gpu.utilPct, 80, 95)}
+                value={`${Math.round(safeGet(latest(), "gpu.utilPct", 0))}%`}
+                accent={severity(safeGetNull(latest(), "gpu.utilPct"), 80, 95)}
               />
               <StatRow
                 label="  Temp"
-                value={fmtTemp(latest()!.gpu.tempC)}
-                accent={severity(latest()!.gpu.tempC, 85, 95)}
+                value={fmtTemp(safeGetNull(latest(), "gpu.tempC"))}
+                accent={severity(safeGetNull(latest(), "gpu.tempC"), 85, 95)}
               />
             </box>
 
             <box flexDirection="column" gap={0} marginY={1}>
               <StatRow
                 label="RAM"
-                value={`${formatGB(latest()!.ram.usedBytes)} / ${formatGB(
-                  latest()!.ram.totalBytes,
+                value={`${formatGB(safeGet(latest(), "ram.usedBytes"))} / ${formatGB(
+                  safeGet(latest(), "ram.totalBytes"),
                 )}`}
               />
-              <StatRow label="  Free" value={formatGB(latest()!.ram.freeBytes)} />
+              <StatRow label="  Free" value={formatGB(safeGet(latest(), "ram.freeBytes"))} />
             </box>
 
             <box flexDirection="column" gap={0} marginY={1}>
               <StatRow
                 label="CPU"
-                value={`${Math.round(latest()!.cpu.loadPct)}%`}
-                accent={severity(latest()!.cpu.loadPct, 80, 95)}
+                value={`${Math.round(safeGet(latest(), "cpu.loadPct", 0))}%`}
+                accent={severity(safeGetNull(latest(), "cpu.loadPct"), 80, 95)}
               />
               <StatRow
                 label="  Temp"
-                value={fmtTemp(latest()!.cpu.tempC)}
-                accent={severity(latest()!.cpu.tempC, 80, 95)}
+                value={fmtTemp(safeGetNull(latest(), "cpu.tempC"))}
+                accent={severity(safeGetNull(latest(), "cpu.tempC"), 80, 95)}
               />
             </box>
 
@@ -579,7 +603,7 @@ function Panel(props: {
             >
               <text fg={palette().accent}>● LIVE</text>{" "}·{" "}
               {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
-              {refreshMs()}ms
+              {safeString(refreshMs())}ms
             </text>
           </box>
         </Show>

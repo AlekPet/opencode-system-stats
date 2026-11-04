@@ -21,22 +21,54 @@ TUI, with a configurable refresh rate.
 ## Install
 
 Local plugins under `.opencode/plugins/` are auto-loaded — no configuration
-required. Place this directory as a sibling and OpenCode picks it up on restart:
+required. Follow these steps to install the plugin:
 
-```
-<project>/.opencode/plugins/opencode-system-stats/   ← this repo
-```
+1. **Ensure you have OpenCode v2.x installed** on your system
+2. **Navigate to your project directory** where you want to install the plugin:
+   ```bash
+   cd /path/to/your/project
+   ```
+3. **Create the plugins directory structure** if it doesn't exist:
+   ```bash
+   mkdir -p .opencode/plugins
+   ```
+4. **Place this plugin in the correct location** by copying or moving the entire directory:
+   ```bash
+   cp -r /path/to/opencode-system-stats/.opencode/plugins/opencode-system-stats .opencode/plugins/
+   ```
+   
+   OR
+   
+   ```bash
+   mv /path/to/opencode-system-stats .opencode/plugins/opencode-system-stats
+   ```
 
-## Usage
+5. **Restart OpenCode service and client** to load the new plugin:
+   ```bash
+   # Restart the OpenCode service
+   opencode serve --service
+   
+   # Restart the OpenCode TUI client (if running)
+   opencode
+   ```
 
-| Command        | Description                                    |
-| -------------- | ---------------------------------------------- |
-| `/system-stats`  | Toggle the floating stats overlay open/closed. |
-| `/system-stats-refresh` | Choose the refresh rate (dialog preset). |
-| `/system-stats-theme` | Choose the phosphor palette (amber / green / mono). |
-| `/system-stats-position` | Choose the overlay anchor (6 screen positions). |
+The plugin is automatically loaded by OpenCode when placed in the correct location.
 
-All commands are also available from the palette (`<Cmd/Ctrl+P>`).
+## Quick Start
+
+To quickly get started with the system stats plugin:
+
+1. **Install the plugin** following the installation steps above
+2. **Open OpenCode** and navigate to a project directory
+3. **Use one of the following commands** to interact with the plugin:
+   - `/system-stats` - Toggle the floating stats overlay open/closed
+   - `/system-stats-refresh` - Change the refresh rate (200/500/1000/2000/5000 ms)
+   - `/system-stats-theme` - Switch between amber, green, or mono themes
+   - `/system-stats-position` - Move the overlay to different screen positions
+
+4. **To see the stats panel**, type `/system-stats` in the command palette (Ctrl+P) or use the slash command directly
+
+5. **Customize your experience** by using the commands above or clicking on the footer of the panel which also opens the refresh rate selector
 
 ## How it works
 
@@ -51,6 +83,24 @@ All commands are also available from the palette (`<Cmd/Ctrl+P>`).
 - **TUI part** (`src/tui.tsx`) polls the RPC on a timer while the overlay is
   visible and renders it into the root `app` slot as an absolutely-positioned
   overlay (six anchors), instead of a host-docked `session.panel`.
+
+## Debugging
+
+If you encounter issues with the plugin:
+
+1. **Check the service logs**: The OpenCode service logs are located at:
+   ```
+   /home/alekpet/.local/share/opencode/log/opencode.log
+   ```
+
+2. **Look for error messages** that may contain:
+   - `msg="loading plugin"` - to confirm plugin loading
+   - `rpc.unavailable` - indicates RPC registration issues
+   - `TextNodeRenderable only accepts string` - the specific error you're experiencing
+
+3. **Restart OpenCode**: After making changes to the plugin code or when encountering persistent errors, restart both:
+   - The OpenCode service (`opencode serve --service`)
+   - The OpenCode TUI client (`opencode`)
 
 ## Development
 
