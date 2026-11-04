@@ -612,17 +612,24 @@ function Panel(props: {
               />
             </box>
 
-            <text
+            // NOTE: a `<text>` is a leaf — it CANNOT contain a child element
+            // (nesting `<text>` inside `<text>` throws
+            // "TextNodeRenderable only accepts strings…"). The footer is a row
+            // `<box>` with two sibling `<text>` runs: the accent "● LIVE"
+            // indicator and the muted update/refresh info.
+            <box
               marginY={1}
-              fg={palette().muted}
-              font="dim"
+              flexDirection="row"
+              alignItems="center"
               title="click to change refresh rate"
               onClick={() => void applyRefreshRate(context, refreshMs, setRefreshMs)}
             >
-              <text fg={palette().accent}>● LIVE</text>{" "}·{" "}
-              {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
-              {safeString(refreshMs())}ms
-            </text>
+              <text fg={palette().accent} font="dim">● LIVE</text>{" "}·{" "}
+              <text fg={palette().muted} font="dim">
+                {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh{" "}
+                {safeString(refreshMs())}ms
+              </text>
+            </box>
           </box>
         </Show>
       </box>
