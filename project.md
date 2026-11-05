@@ -65,6 +65,25 @@ VRAM (использ + свободно), RAM (использ + свободно
        текущее значение = `single` рамка + `▸` + акцент, остальные = `dashed` + `dim`.
        Тело диалога ОБЯЗАТЕЛЬНО должно быть внутри `paletteCtx.Provider`, иначе
        `useContext(paletteCtx)` в `SettingsBody`/`Option` не резолвится. Коммит `2cc21d4`.
+- [x] **2026-11-06**: рабочая съёмка экрана для инспекции живого UI (см. «Эксплуатация»).
+- [ ] **2026-11-06**: улучшение внешнего вида единого диалога настроек. Найден 2 дефекта
+      OpenTUI (см. «Текущие дефекты»), требующие правки `tui.tsx` (`Option`/`SettingsBody`):
+      (1) проп `title` на `<box>` рендерится **видимым текстом**, а не тултипом — сейчас это
+      «select this option»/«selected»/«open settings»/«close»/«click for settings» в интерфейсе;
+      (2) `flexWrap="wrap"` не даёт 2 в ряд — опции всё ещё в одну колонку, хотя нужно 2 в ряд
+      для компактности. Фикс в работе.
+
+### Текущие дефекты OpenTUI (v2.2.5, подтверждены скриншотом)
+
+1. **`title` на `<box>` → видимый текст, не тултип.** Атрибут `title` не скрывается: он
+   выводится как обычный текст внутри узла. В диалоге настроек это мусор: неактивные
+   `Option` показывают `select this option`, активные — `selected`, кнопка close — `close`,
+   футер панели — `click for settings`. Убрать все `title` из `<box>`, иначе грязь
+   (возможно, баг OpenTUI; при желании — репорт в upstream).
+2. **`flexWrap="wrap"` не ломает на 2 в ряд.** `Option` (ширина `23`) в `flexDirection="row"`
+   с `flexWrap="wrap"` всё ещё идут в одну колонку. Надо проверить, какой атрибут сетки
+   OpenTUI понимает (или задать `width` строке/контейнеру вручную).
+
 
 ### Решённые причины падений/ошибок (все подтверждены экспериментом)
 
@@ -265,6 +284,40 @@ VRAM (использ + свободно), RAM (использ + свободно
 правильным `location` — RPC-контракт с этим id в его процессе не зарегистрирован.
 Поэтому нужен **полный перезапуск OpenCode** (сервис + TUI), а не только TUI.
 Проверка после рестарта — чек-лист ниже (ожидается HTTP 200).
+
+### Съёмка экрана для инспекции живого UI (2026-11-06)
+
+`maim` даёт чёрный кадр на Wayland/WSLg. Рабочий путь — скрин через **Windows
+PowerShell** в буфер обмена, сохранение в файл, доступный из WSL:
+
+```bash
+# 1. Сохранить .ps1 в Windows-доступный путь (не /tmp — там WSL tmpfs, невидимый для pwsh)
+cat > /mnt/e/AI_Tools/projects/opencode-system-stats/_shot.ps1 <<'PS'
+Add-Type -AssemblyName System.Windows.Forms
+[Windows.Forms.Clipboard]::GetImage() | ForEach-Object {
+  $bmp = New-Object System.Drawing.Bitmap($_)
+  $bmp.Save("C:\tmp\screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
+}
+"saved C:\tmp\screenshot.png"
+PS
+
+# 2. Запустить через powershell.exe с -EncodedCommand (иначе Execution Policy /
+#    «флаг зоны из интернета» блокирует -File). Base64 из UTF-16LE:
+enc=$(iconv -f UTF-8 -t UTF-16LE /mnt/e/AI_Tools/projects/opencode-system-stats/_shot.ps1 | base64 -w0)
+powershell.exe -ExecutionPolicy Bypass -EncodedCommand "$enc" 2>/dev/null | grep saved
+
+# 3. Прочитать результат в OpenCode:
+#    read /mnt/c/tmp/screenshot.png
+```
+
+Скрин 2560×1440, открывается в `/mnt/c/tmp/screenshot.png`. Рабочая проверка:
+`iconv -f UTF-8 -t UTF-16LE _shot.ps1 | base64 -w0` → `powershell.exe -ExecutionPolicy Bypass -EncodedCommand "$enc"`.
+
+> ⚠️ `.ps1` через `powershell.exe -File` не работает: Execution Policy блокирует +
+> PowerShell помечает файл «из интернета» (зона Downloads/WSL) → «невозможно
+> загрузить файл». Решение — `-EncodedCommand` (Base64 UTF-16LE), он обходит обе
+> проверки.
+
 
 ---
 
