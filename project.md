@@ -56,6 +56,15 @@ VRAM (использ + свободно), RAM (использ + свободно
       `app` (6 позиций, absolute + `zIndex`, как в `devtools-bar.tsx`);
       команда `/system-stats-position`, опрос RPC только при видимом overlay
 - [x] Финализация bible
+- [x] **2026-11-05**: все настройки панели (refresh / theme / position) собраны в
+       единый диалог настроек (`SettingsBody`), открывающийся по клику из панели —
+       заменили три `/system-stats-*` команды. Изменения применяются к живой панели
+       мгновенно (общий реактивный store). Открытие: `dialog.set({size:'medium',
+       centered:true})` + `dialog.show(<SettingsBody/>)` обёрнут в `paletteCtx.Provider`;
+       закрытие: `dialog.clear()` (Esc / клик вне). `Option` — кликабельная коробка:
+       текущее значение = `single` рамка + `▸` + акцент, остальные = `dashed` + `dim`.
+       Тело диалога ОБЯЗАТЕЛЬНО должно быть внутри `paletteCtx.Provider`, иначе
+       `useContext(paletteCtx)` в `SettingsBody`/`Option` не резолвится. Коммит `2cc21d4`.
 
 ### Решённые причины падений/ошибок (все подтверждены экспериментом)
 
