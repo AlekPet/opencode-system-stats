@@ -8,7 +8,8 @@ import type { Stats } from "./rpc.js"
  * Every collector is defensive: on any failure it returns a safe fallback so the
  * panel keeps rendering. CPU temperature is layered across platforms:
  * LibreHardwareMonitor over HTTP on this WSL2 host (thermal zones are absent in
- * WSL), sysfs thermal zones on bare Linux — either degrades to null. Other
+ * WSL), `systeminformation` on bare Linux/macOS/Windows (null on WSL2), then
+ * sysfs thermal zones on bare Linux — either degrades to null. Other
  * collectors degrade per-field.
  */
 
@@ -226,7 +227,30 @@ async function readCpuTempLhm(signal?: AbortSignal): Promise<number | null> {
   return pickCpuTemp(collectLhmSensors(tree))
 }
 
-// Method 2: bare-Linux thermal zones. Returns null when no cpu/core zone exists
+// Method 2: systeminformation (cross-platform, non-WSL). Dynamic import so a
+// missing/unloadable package degrades to null instead of crashing the RPC
+// process. On WSL2 it returns null (the VM has no host sensors), so it falls
+// through to sysfs. Numbers, not localized strings.
+async function readCpuTempSi(signal?: AbortSignal): Promise<number | null> {
+  try {
+    if (signal?.aborted) return null
+    const mod = await import("systeminformation")
+    const si = mod.systeminformation ?? mod.default ?? mod
+    const t = await si.cpuTemperature()
+    const v =
+      typeof t?.main === "number"
+        ? t.main
+        : typeof t?.max === "number"
+          ? t.max
+          : null
+    if (v != null && v > 0 && !Number.isNaN(v)) return v
+  } catch {
+    // package missing / platform unsupported / no sensors
+  }
+  return null
+}
+
+// Method 3: bare-Linux thermal zones. Returns null when no cpu/core zone exists
 // (as on this WSL2 host). Temps are stored in milli-Celsius.
 function readCpuTempSysfs(): number | null {
   try {
@@ -252,10 +276,13 @@ function readCpuTempSysfs(): number | null {
 }
 
 // Layered CPU temperature. Order matters: LHM first (this WSL2 host), then
-// sysfs (bare Linux). Any method returning null is skipped by collectStats.
+// systeminformation (bare Linux/macOS/Windows — null on WSL2), then sysfs
+// (bare Linux). Any method returning null is skipped by collectStats.
 async function readCpuTemp(signal?: AbortSignal): Promise<number | null> {
   const fromLhm = await readCpuTempLhm(signal)
   if (fromLhm != null) return fromLhm
+  const fromSi = await readCpuTempSi(signal)
+  if (fromSi != null) return fromSi
   return readCpuTempSysfs()
 }
 

@@ -9,7 +9,8 @@
     "./rpc": "./src/rpc.ts"
   },
   "dependencies": {
-    "@opencode/plugin": "latest"
+    "@opencode/plugin": "latest",
+    "systeminformation": "^5.33.19"
   },
   "peerDependencies": {
     "@opentui/core": ">=0.6.6",

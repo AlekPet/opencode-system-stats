@@ -8,8 +8,10 @@ TUI, with a configurable refresh rate.
 
 - **VRAM** used / total, plus utilization and temperature (color-coded bands).
 - **RAM** used / total / free.
-- **CPU load %** (two-sample delta on `/proc/stat`) and temperature when the
-  host exposes thermal zones.
+- **CPU load %** (two-sample delta on `/proc/stat`) and temperature. CPU temp is
+  read cross-platform — LibreHardwareMonitor over HTTP on WSL2/Windows,
+  `systeminformation` on bare Linux/macOS, sysfs as a last resort — and the
+  panel renders `—` when nothing exposes a sensor.
 - **Configurable refresh rate** via a select dialog
   (`200 / 500 / 1000 / 2000 / 5000` ms), persisted across sessions.
 - **Floating overlay** that can sit in any corner or at the top/bottom centre of
@@ -78,11 +80,57 @@ To quickly get started with the system stats plugin:
   - GPU: `nvidia-smi --query-gpu=name,memory.used,memory.total,temperature.gpu,utilization.gpu --format=csv`
   - RAM: `/proc/meminfo` (used = Total − Available)
   - CPU load: two `/proc/stat` samples ~150 ms apart
-  - CPU temp: `/sys/class/thermal/thermal_zone*/temp` (null when unavailable,
-    e.g. under WSL where only `cooling_device*` exist)
+  - CPU temp: layered cascade — LHM over HTTP (WSL2/Windows sensor host),
+    `systeminformation` (bare Linux/macOS), then sysfs; `null` when nothing
+    exposes a temperature (see "CPU temperature")
 - **TUI part** (`src/tui.tsx`) polls the RPC on a timer while the overlay is
   visible and renders it into the root `app` slot as an absolutely-positioned
   overlay (six anchors), instead of a host-docked `session.panel`.
+
+## CPU temperature (LibreHardwareMonitor)
+
+CPU temperature is read with a layered cascade, so it works on the host's OS:
+
+1. **LibreHardwareMonitor (LHM) over HTTP** — primary on **WSL2** (and any box
+   whose sensors live on Windows). WSL2 runs in a VM with no access to the
+   host's sensors (`/sys/class/thermal` is empty, `systeminformation` returns
+   `null`), so temperatures are read from the Windows side.
+2. **`systeminformation`** — cross-platform fallback for bare Linux, macOS and
+   Windows (non-WSL).
+3. **sysfs thermal zones** — last-resort bare-Linux path
+   (`/sys/class/thermal/thermal_zone*/temp`, milli-°C).
+4. **`null`** — if nothing exposes a temperature, the panel renders `—`.
+
+### Windows setup (needed on WSL2)
+
+LHM must run on Windows with its **Remote Web Server** enabled
+(`Tools → Remote Web Server → Run`, default port **8085**, exposes
+`http://localhost:8085/data.json`). It is read from WSL with an ordinary
+`fetch`. **Run LHM as administrator**, otherwise the CPU sensors are not read.
+
+**Firewall.** Windows Defender blocks inbound `:8085` by default. Allow it:
+
+```powershell
+netsh advfirewall firewall add rule name="Allowing Libre Hardware Monitor (LHM) WSL connections" dir=in action=allow protocol=TCP localport=8085
+```
+
+**Port forwarding (Windows 10 / NAT).** In NAT mode WSL2 sits behind Windows'
+NAT, so `localhost:8085` from WSL may not reach Windows. The code already tries
+`localhost` first, then the WSL default gateway IP (NAT) — so it usually works
+as-is. If you need `localhost` to reach LHM explicitly:
+
+- **Mirrored networking (Windows 11 22H2+):** set
+  `networkingMode=mirrored` in `C:\Users\<you>\.wslconfig`, then
+  `wsl --shutdown` and reopen WSL — `localhost` works both ways.
+- **Portproxy (Windows 10):** forward the port to WSL's IP (your `eth0`
+  address, from `ip addr`). Replace `192.168.1.3` accordingly:
+
+  ```powershell
+  netsh interface portproxy add v4tov4 listenport=8085 listenaddress=0.0.0.0 connectport=8085 connectaddress=192.168.1.3
+  ```
+
+Override the probe host explicitly with the `SYSTEM_STATS_LHM_HOST` environment
+variable if neither of the above applies.
 
 ## Debugging
 
@@ -116,4 +164,7 @@ npx tsc --noEmit      # type-check (uses tsconfig.json)
 
 - OpenCode v2.x
 - `nvidia-smi` on PATH for GPU data (RAM/CPU work without it).
-- Linux/WSL (`/proc/*`, `/sys/class/thermal/*`).
+- Bare Linux/macOS for out-of-the-box CPU temperature (`systeminformation`).
+  On **WSL2** CPU temperature comes from **LibreHardwareMonitor** running on
+  Windows — see "CPU temperature" above (needs the Windows firewall rule and,
+  under NAT, either mirrored networking or a portproxy).
