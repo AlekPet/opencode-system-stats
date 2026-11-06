@@ -61,28 +61,55 @@ VRAM (использ + свободно), RAM (использ + свободно
        заменили три `/system-stats-*` команды. Изменения применяются к живой панели
        мгновенно (общий реактивный store). Открытие: `dialog.set({size:'medium',
        centered:true})` + `dialog.show(<SettingsBody/>)` обёрнут в `paletteCtx.Provider`;
-       закрытие: `dialog.clear()` (Esc / клик вне). `Option` — кликабельная коробка:
-       текущее значение = `single` рамка + `▸` + акцент, остальные = `dashed` + `dim`.
+       закрытие: `dialog.clear()` (Esc / клик вне). `Option` — однострочный чип:
+       текущее значение = инверсная акцентная полоса + `▸` + `BOLD`, остальные —
+       прозрачный фон + `muted` текст.
        Тело диалога ОБЯЗАТЕЛЬНО должно быть внутри `paletteCtx.Provider`, иначе
        `useContext(paletteCtx)` в `SettingsBody`/`Option` не резолвится. Коммит `2cc21d4`.
 - [x] **2026-11-06**: рабочая съёмка экрана для инспекции живого UI (см. «Эксплуатация»).
-- [ ] **2026-11-06**: улучшение внешнего вида единого диалога настроек. Найден 2 дефекта
-      OpenTUI (см. «Текущие дефекты»), требующие правки `tui.tsx` (`Option`/`SettingsBody`):
-      (1) проп `title` на `<box>` рендерится **видимым текстом**, а не тултипом — сейчас это
-      «select this option»/«selected»/«open settings»/«close»/«click for settings» в интерфейсе;
-      (2) `flexWrap="wrap"` не даёт 2 в ряд — опции всё ещё в одну колонку, хотя нужно 2 в ряд
-      для компактности. Фикс в работе.
+- [x] **2026-11-06**: температура CPU теперь реально считывается через
+      **LibreHardwareMonitor (LHM)** по HTTP (`:8085/data.json`) — в WSL2
+      `/sys/class/thermal` пуст, датчики на стороне Windows. Каскад в
+      `readCpuTemp()`: LHM (HTTP) → sysfs (гоый Linux → null) → null. Переменная
+      `SYSTEM_STATS_LHM_HOST` переопределяет хост; шлюз по умолчанию (NAT)
+      `172.25.192.1` отвечает :8085 после правила фаэра Windows на TCP :8085.
+      Русская локаль `"79,0 °C"` парсится; берётся `CPU Package`. `readCpuTemp()`
+      стал асинхронным, `collectStats()` её `await`. Схема `rpc.ts` и панель
+      `tui.tsx` — без правок. Тест: `cpuTempC ≈ 79–82`, `elapsedMs ~300`.
+- [x] **2026-11-06**: улучшение внешнего вида единого диалога настроек.
+      Правки в `tui.tsx` (`Option`/`SettingsBody`/`overlayProps`):
+      (1) убраны все псевдо-тултипы `title` (это заголовки рамки, а не подсказки);
+      (2) `font="bold"/"dim"` заменены на рабочий `attributes={TextAttributes.BOLD|DIM}`
+          (проп `font` не существует и молча игнорировался);
+      (3) `borderStyle="dashed"` заменён на валидные `single|double`;
+      (4) опции — однострочные чипы 2 в ряд, активная = инверсная акцентная полоса + `▸`;
+      (5) диалог растянут на весь хост-диалог (`width="100%"` + `marginTop={-1}`),
+          чтобы не было серой рамки; `paddingX={2}` + `paddingX={1}` у заголовка;
+      (6) в футере панели убран плейсхолдер `— ·`, из-за которого «полоса с точкой»
+          переносилась сразу после `● LIVE`; время сокращено до `Nс`.
+      Отдельно починено **позиционирование overlay**: `overlayProps` теперь всегда
+      возвращает все 4 ключа (`top/bottom/left/right`, лишние = `undefined`), и
+      `useTerminalDimensions()` читается как аксессор (`terminal().width`).
 
-### Текущие дефекты OpenTUI (v2.2.5, подтверждены скриншотом)
+### Текущие дефекты OpenTUI (v2.2.5, подтверждены экспериментом)
 
-1. **`title` на `<box>` → видимый текст, не тултип.** Атрибут `title` не скрывается: он
-   выводится как обычный текст внутри узла. В диалоге настроек это мусор: неактивные
-   `Option` показывают `select this option`, активные — `selected`, кнопка close — `close`,
-   футер панели — `click for settings`. Убрать все `title` из `<box>`, иначе грязь
-   (возможно, баг OpenTUI; при желании — репорт в upstream).
-2. **`flexWrap="wrap"` не ломает на 2 в ряд.** `Option` (ширина `23`) в `flexDirection="row"`
-   с `flexWrap="wrap"` всё ещё идут в одну колонку. Надо проверить, какой атрибут сетки
-   OpenTUI понимает (или задать `width` строке/контейнеру вручную).
+1. **`title` на `<box>` → заголовок рамки, не тултип.** Он рисуется на границе
+   (`drawBox`/`titleAlignment`), поэтому «подсказки» вроде `select this option`
+   попадали в интерфейс видимым текстом. Не использовать `title` как tooltip.
+2. **JSX-spread в `@opentui/solid` не удаляет исчезнувшие ключи.**
+   `spreadExpression` итерирует только ключи **нового** объекта и не сбрасывает
+   старые. Смена `{top,right}` → `{bottom,left}` оставляла `top/right` в силе,
+   из-за чего absolute-бокс растягивался и панель не двигалась. Правило: при
+   реактивном spread **всегда возвращать полный набор ключей**, неиспользуемые —
+   `undefined` (сеттеры `top/bottom/left/right` явно чистят ребро).
+3. **`useTerminalDimensions()` возвращает Accessor.** Правильно:
+   `const dims = useTerminalDimensions(); dims().width`, а не `…().width`/
+   `dims.width`. Раньше `.width` был `undefined` → `left = NaN` → центрирование
+   (`top-center`/`bottom-center`) не работало.
+4. **Хост-диалог TUI (`size:"medium"`)** — это бокс шириной **60** колонок с
+   `backgroundColor = theme.background.base` и `paddingTop={1}`; своего контента
+   он не центрирует. Узкое тело (50) оставляло серую рамку. Лечится
+   `width="100%"` + `marginTop={-1}` на корне тела.
 
 
 ### Решённые причины падений/ошибок (все подтверждены экспериментом)
@@ -327,7 +354,10 @@ powershell.exe -ExecutionPolicy Bypass -EncodedCommand "$enc" 2>/dev/null | grep
 - GPU: NVIDIA GeForce RTX 3070 Ti.
 - `/proc/meminfo`, `/proc/stat` доступны.
 - Thermal zones: **отсутствуют** в этой WSL (`/sys/class/thermal/thermal_zone*` нет).
-  → Температура CPU = `null` (код gracefully деградирует, схема допускает null).
+  → Датчики температуры — на стороне Windows. Температура CPU читается через
+  **LibreHardwareMonitor (LHM)** по HTTP (см. «CPU temp — LHM ниже»).
+  `readCpuTemp()` деградирует в `null`, если LHM недоступен; схема и панель это
+  держат (панель рисует `—`).
 - `sensors` (lm-sensors): не установлен.
 
 ---
@@ -361,9 +391,55 @@ kB → *1024. Ключи: `MemTotal`, `MemAvailable`, `MemFree`. Used = Total - 
 Два сэмпла с паузой ~150ms. Первая строка `cpu  user nice system idle iowait irq softirq steal guest guest_nice`.
 load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
 
-### CPU temp — thermal zones
-Попытка: `/sys/class/thermal/thermal_zone*/temp` (+ `/type` для фильтрации cpu/core).
-В этой WSL нет → `null`. Фолбэк: `sensors` (не установлен здесь).
+### CPU temp — каскад (LHM → sysfs → null)
+См. раздел «CPU temp — LHM (LibreHardwareMonitor)» ниже. Кратко: в этой WSL
+`/sys/class/thermal` пуст, поэтому голый Linux-путь (`readCpuTempSysfs`) даёт
+`null`; рабочая методика — LHM по HTTP со стороны Windows. `sensors` не установлен.
+
+### CPU temp — LHM (LibreHardwareMonitor)
+Основной метод на этой WSL2: чтение температуры CPU с **Windows**-стороны через
+LHM Remote Web Server по HTTP. На Windows запущен `LibreHardwareMonitor.exe` и
+включён *Tools → Remote Web Server* (HTTP :8085, `/data.json`).
+
+**Каскад в `readCpuTemp()` (`src/stats.ts`):**
+1. `readCpuTempLhm()` — `fetch` HTTP к `:8085/data.json` (см. хосты ниже).
+2. `readCpuTempSysfs()` — `/sys/class/thermal/thermal_zone*/temp` (гоый Linux);
+   на этой WSL2 → `null`.
+3. Любой вернувший число метод побеждает; иначе — `null`.
+
+**Хосты для `fetch` (`lhmHosts()`), порядок:**
+- `SYSTEM_STATS_LHM_HOST` — явное переопределение (один хост).
+- `localhost` — mirrored networking на Win11 22H2+ (если проброшено :8085).
+- Шлюз по умолчанию из `ip route show default` — **NAT-режим WSL2**; на этой
+  машине `172.25.192.1` отвечает :8085.
+- Если `ip`/маршрутизации нет — только `localhost`.
+Проверено: `localhost` падает (NAT), затем `172.25.192.1` → HTTP 200, т.е. каскад
+отрабатывает как задумано. У каждого хоста таймаут `AbortSignal.timeout(1500)`,
+так что упавший LHM не вешает цикл обновления.
+
+**Парсинг (`collectLhmSensors` → `pickCpuTemp`):** рекурсивный обход дерева
+`data.json`; узлы со значением `°C` → температура. Локаль Windows русская →
+`"79,0 °C"` (десячная запятая): замена `,`→`.` и первая цифра. Выбираем
+агрегатный показатель по регулярке `CPU Package|Tctl|Tdie` (Intel `CPU Package`,
+AMD `Tctl`/`Tdie`), приоритет над per-core и «Distance to TjMax» (`cpuRank`).
+
+**Фаэр Windows:** правило inbound для процесса LHM:
+```powershell
+New-NetFirewallRule -DisplayName "LHM Remote Web" -Direction Inbound `-
+  -LocalPort 8085 -Protocol TCP -Action Allow -Program "C:\...\LibreHardwareMonitor.exe"
+```
+Без него :8085 слушается, но брандмауэр дропает inbound → WSL видит только
+`localhost` (который под NAT не проброшен) и падает в `null`.
+
+**Результат:** `cpu.tempC` теперь реально считывается (наблюдено `≈79–82 °C` на
+Intel i7-11700K). Схема `rpc.ts` (`["number","null"]`) и панель `tui.tsx`
+(`fmtTemp` рисует `—` для null, окраска по полосам 80/95) — **без правок**.
+`readCpuTemp()` стал асинхронным; `collectStats()` её `await`.
+
+**Тест/отладка:** `node --experimental-strip-types` умеет стропить `.ts`
+напрямую (импорт `rpc` — только тип, рантайм-зависимостей нет). ⚠️ Баг хабстраста:
+файл-тест в `/tmp` с относительным `import "./stats.ts"` резолвится в `/tmp/stats.ts`
+→ `ERR_MODULE_NOT_FOUND`. Тестить из `src` (абс. путём или из каталога `src`).
 
 ---
 
@@ -401,6 +477,12 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
   `initial` применяется к отсутствующему ключу; сохранённое значение имеет приоритет.
 - **TUI select**: `context.ui.dialog.select({ title, current, options: [{title,value,...}] })`.
   `current` должен совпадать с `value` опции, чтобы подсветить.
+- **TUI custom dialog**: `context.ui.dialog.set({ size:"medium"|"large"|"xlarge", centered })`
+  + `context.ui.dialog.show(() => <JSX/>)`; закрытие — `context.ui.dialog.clear()`
+  (Esc / клик вне работают сами). Хост оборачивает JSX в бокс шириной
+  **60/88/116** колонок с фоном `theme.background.base` и `paddingTop={1}`.
+  Чтобы не было серой рамки, тело делать `width="100%"` (+ `marginTop={-1}`),
+  а не фиксированной ширины.
 - **TUI panel (host-docked)**: `context.ui.slot({ append: "session.panel", render: (panel) => <Show when={panel.name==="system-stats">...</Show> })`.
   Открытие: `context.ui.panel.open("system-stats")`. panel даёт reactive `name, width, focused` + `close/focus`.
   Ограничение: `session.panel` умеет только `"panel"` (сбоку) или `"fullscreen"`;
@@ -445,12 +527,11 @@ load% = (Δtotal - Δidle) / Δtotal * 100, где idle = idle + iowait.
   На очень узком окне футер аккуратно переносится (ниже 32 не сжимаем).
 - **Паддинг уменьшен с 2 до 1**, строки внутри секций стоят плотнее
   (`gap={0}`), секции разделены одной пустой строкой (`marginY={1}`).
-- **Футер кликабелен**: `onClick` на `<text>` открывает тот же floating-select
-  частоты, что и команда `/system-stats-refresh` (вынесено в общий
-  `applyRefreshRate(context, refreshMs, setRefreshMs)` + `REFRESH_OPTIONS`).
-  Поддерживается рантаймом OpenTUI (в бинарнике есть таблица `onClick`/`onMouseDown`
-  и `dialog.select`). ТРЕБУЕТ терминала с мышью — если курсором не кликают,
-  частоту всё ещё меняют командой `/system-stats-refresh`.
+- **Футер кликабелен**: `onMouseUp` на футере (и на всей панели) открывает
+  **единый диалог настроек** (`SettingsBody`: refresh/theme/position), а не
+  отдельный select частоты. Старые `/system-stats-refresh|theme|position`
+  остаются как palette/slash-команды. Поддерживается рантаймом OpenTUI
+  (`onMouseUp`/`onMouseDown`); нужен terminal с мышью.
 - `props.width` из slot больше не используется: панель больше **не** `session.panel`,
   а absolute-overlay в слоте `app`, ширина считается по контенту.
 - `props.width` удалён из типа `Panel` вместе с переходом на overlay.
