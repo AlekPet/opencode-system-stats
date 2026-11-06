@@ -7,17 +7,18 @@ import {
   onCleanup,
 } from "solid-js";
 import { useTerminalDimensions } from "@opentui/solid";
+import { TextAttributes } from "@opentui/core";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import { Stats } from "./rpc.js";
 import type { Stats as StatsSnapshot } from "./rpc.js";
 import { formatGB } from "./stats.js";
 
 const PRESETS = [
-  { value: 200, label: "200 ms — fastest" },
-  { value: 500, label: "500 ms — smooth" },
-  { value: 1000, label: "1000 ms — default" },
-  { value: 2000, label: "2000 ms — light" },
-  { value: 5000, label: "5000 ms — background" },
+  { value: 200, label: "200 ms" },
+  { value: 500, label: "500 ms" },
+  { value: 1000, label: "1000 ms" },
+  { value: 2000, label: "2000 ms" },
+  { value: 5000, label: "5000 ms" },
 ];
 
 // Retro 70s–90s early-computer phosphor palettes. Each theme is self-contained
@@ -108,21 +109,44 @@ const POSITION_OPTIONS = POSITION_NAMES.map((name) => ({
 // "blocks interaction" bug. For the centre anchors the left offset is derived
 // from the terminal width (cells) via `useTerminalDimensions`, so the panel
 // stays centred without a full-width box.
-function overlayProps(position: Position, cols: number) {
+function overlayProps(position: Position, cols: number, width: number) {
   const inset = 1;
-  const width = useTerminalDimensions().width;
   const centerX = Math.max(inset, Math.floor((width - cols) / 2));
-  if (position === "top-left")
-    return { position: "absolute" as const, zIndex: 2600, top: inset, left: inset };
-  if (position === "top-right")
-    return { position: "absolute" as const, zIndex: 2600, top: inset, right: inset };
-  if (position === "top-center")
-    return { position: "absolute" as const, zIndex: 2600, top: inset, left: centerX };
-  if (position === "bottom-left")
-    return { position: "absolute" as const, zIndex: 2600, bottom: inset, left: inset };
-  if (position === "bottom-center")
-    return { position: "absolute" as const, zIndex: 2600, bottom: inset, left: centerX };
-  return { position: "absolute" as const, zIndex: 2600, bottom: inset, right: inset };
+  // IMPORTANT: always return ALL four positional keys, even when unused.
+  // @opentui/solid's `spread` only iterates the keys of the NEXT props object;
+  // it never deletes keys that disappeared. Returning a partial object (e.g.
+  // `{top,right}` → `{bottom,left}`) therefore left the old `top`/`right` in
+  // place, over-constraining the absolute box so the panel never moved. Keys
+  // explicitly set to `undefined` are cleared by the renderable setters.
+  const anchor: {
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+  } = (() => {
+    switch (position) {
+      case "top-left":
+        return { top: inset, left: inset };
+      case "top-right":
+        return { top: inset, right: inset };
+      case "top-center":
+        return { top: inset, left: centerX };
+      case "bottom-left":
+        return { bottom: inset, left: inset };
+      case "bottom-center":
+        return { bottom: inset, left: centerX };
+      default:
+        return { bottom: inset, right: inset };
+    }
+  })();
+  return {
+    position: "absolute" as const,
+    zIndex: 2600,
+    top: anchor.top,
+    bottom: anchor.bottom,
+    left: anchor.left,
+    right: anchor.right,
+  };
 }
 
 // Options shared by the `/system-stats-refresh` command and by clicking the
@@ -514,6 +538,9 @@ function Panel(props: {
   openSettings: () => void;
 }) {
   const context = usePlugin();
+  // One resize subscription for the whole panel. `useTerminalDimensions` returns
+  // an accessor (`() => {width,height}`), not the dimensions themselves.
+  const terminal = useTerminalDimensions();
   const latest = props.latest;
   const error = props.error;
   const refreshMs = props.refreshMs;
@@ -569,7 +596,9 @@ function Panel(props: {
     const ageSec = Math.max(0, Math.floor((now() - snap.collectedAt) / 1000));
     // Drop the ambiguous "только что" wording; show relative time only once
     // at least a second has passed (the "● LIVE" dot already conveys freshness).
-    return ageSec < 1 ? null : `${ageSec}с назад`;
+    // Keep it short (`5с`, not `обновлено 5с назад`) so the footer never wraps
+    // in the panel's narrow content column.
+    return ageSec < 1 ? null : `${ageSec}с`;
   };
 
   // Color a numeric value by severity band. Falls back to muted when unavailable.
@@ -618,7 +647,7 @@ function Panel(props: {
       {/* Floating overlay anchored by `position`: the wrapper is absolute
           inside the app slot's flexGrow area and aligns the fixed-width panel
           left / centre / right on the top or bottom edge. */}
-      <box {...overlayProps(position(), cols)}>
+      <box {...overlayProps(position(), cols, terminal().width)}>
         <Show
           // Compare to `null` (not pass the snapshot itself) so the tree is built
           // once and only its reactive attributes update on each refresh.
@@ -700,18 +729,19 @@ function Panel(props: {
               alignItems="center"
               justifyContent="space-between"
               onMouseUp={() => void openSettings()}
-              title="click for settings"
             >
               {/* Live dot — visually separated from the update/refresh text. */}
               <box
                 onMouseUp={() => void openSettings()}
-                title="open settings"
               >
-                <text fg={palette().accent} font="bold">● LIVE</text>
+                <text fg={palette().accent} attributes={TextAttributes.BOLD}>● LIVE</text>
               </box>
-              {/* Relative update time + refresh rate, in muted text. */}
-              <text fg={palette().muted} font="dim">
-                {updatedLabel() ? `обновлено ${updatedLabel()}` : "—"} · refresh {safeString(refreshMs())}ms
+              {/* Relative update time (once at least a second old) + refresh
+                  rate. No placeholder dash/dot when the age is unknown: that
+                  stray "— ·" used to wrap right after "● LIVE" and look like
+                  part of the badge. */}
+              <text fg={palette().muted} attributes={TextAttributes.DIM}>
+                {updatedLabel() ? `${updatedLabel()} · ` : ""}refresh {safeString(refreshMs())}ms
               </text>
             </box>
           </box>
@@ -721,11 +751,11 @@ function Panel(props: {
   );
 }
 
-// A single clickable option box inside the unified settings dialog. The current
-// value is highlighted with an accent border and a ▸ mark; other options stay
-// dim. Clicking applies the value through `onSelect`. The active palette is read
-// from `paletteCtx` (set by the dialog's provider) so the highlight matches the
-// panel's own look.
+// A single clickable option chip inside the unified settings dialog. The
+// current value is an inverted accent bar with a ▸ mark and bold text; the other
+// options are transparent with muted text. Clicking applies the value through
+// `onSelect`. The active palette is read from `paletteCtx` (set by the dialog's
+// provider) so the highlight matches the panel's own look.
 function Option(props: {
   label: string;
   active: boolean;
@@ -734,20 +764,16 @@ function Option(props: {
   const palette = useContext(paletteCtx);
   return (
     <box
-      width={23}
-      border
-      borderStyle={props.active ? "single" : "dashed"}
-      padding={1}
-      backgroundColor={props.active ? palette().bg : "transparent"}
-      borderColor={props.active ? palette().accent : palette().muted}
+      width={26}
+      paddingX={1}
+      backgroundColor={props.active ? palette().accent : undefined}
       onMouseUp={props.onSelect}
-      title={props.active ? "selected" : "select this option"}
     >
       <text
-        fg={props.active ? palette().accent : palette().muted}
-        font={props.active ? "bold" : "dim"}
+        fg={props.active ? palette().bg : palette().muted}
+        attributes={props.active ? TextAttributes.BOLD : undefined}
       >
-        {(props.active ? "▸ " : "") + props.label}
+        {(props.active ? "▸ " : "  ") + props.label}
       </text>
     </box>
   );
@@ -755,10 +781,11 @@ function Option(props: {
 
 // The unified settings dialog body: refresh rate, theme and position are all
 // edited in ONE window, replacing the three separate `/system-stats-*`
-// commands. Each option is a clickable box and the current value is
-// highlighted. State is read from the live accessors passed in (the same
-// reactive store the panel reads), so a change here applies to the panel
-// immediately. `usePlugin` gives the close button access to `dialog.clear`.
+// commands. Each option is a compact one-line chip (two per row); the current
+// value is highlighted with an inverted accent bar and a ▸ mark. State is read
+// from the live accessors passed in (the same reactive store the panel reads),
+// so a change here applies to the panel immediately. `usePlugin` gives the close
+// button access to `dialog.clear`.
 function SettingsBody(props: {
   themeName: () => ThemeName;
   setTheme: (name: ThemeName) => void;
@@ -774,36 +801,39 @@ function SettingsBody(props: {
   };
 
   return (
+    // `width="100%"` fills the host dialog surface (60 cols for "medium"),
+    // which otherwise shows as a grey frame around a narrower (50-col) body.
+    // The host also prepends one blank row (`paddingTop={1}`); the negative
+    // margin pulls this box up so the theme background covers it too.
     <box
       border
       borderStyle="single"
-      padding={1}
-      width={50}
+      paddingX={2}
+      paddingY={1}
+      width="100%"
+      marginTop={-1}
       backgroundColor={palette().bg}
       borderColor={palette().border}
       flexDirection="column"
-      gap={2}
+      gap={1}
     >
       {/* Title row + a close button. Escape / click-outside also close it. */}
       <box
         flexDirection="row"
         alignItems="center"
         justifyContent="space-between"
+        paddingX={1}
       >
-        <text fg={palette().accent} font="bold">⚙ Stats settings</text>
-        <box
-          onMouseUp={close}
-          title="close"
-          paddingX={1}
-        >
+        <text fg={palette().accent} attributes={TextAttributes.BOLD}>⚙ Stats settings</text>
+        <box onMouseUp={close} paddingX={1}>
           <text fg={palette().muted}>×</text>
         </box>
       </box>
 
       {/* Refresh rate — click a preset to apply it. */}
-      <box flexDirection="column" gap={1}>
-        <text fg={palette().base} font="bold">Refresh rate</text>
-        <box flexDirection="row" flexWrap="wrap" gap={1}>
+      <box flexDirection="column" gap={0}>
+        <text fg={palette().base} attributes={TextAttributes.BOLD}>Refresh rate</text>
+        <box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={0}>
           {PRESETS.map((p) => (
             <Option
               label={p.label}
@@ -815,9 +845,9 @@ function SettingsBody(props: {
       </box>
 
       {/* Theme — click a palette to apply it. */}
-      <box flexDirection="column" gap={1}>
-        <text fg={palette().base} font="bold">Theme</text>
-        <box flexDirection="row" flexWrap="wrap" gap={1}>
+      <box flexDirection="column" gap={0}>
+        <text fg={palette().base} attributes={TextAttributes.BOLD}>Theme</text>
+        <box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={0}>
           {THEME_NAMES.map((name) => (
             <Option
               label={THEMES[name].label}
@@ -829,9 +859,9 @@ function SettingsBody(props: {
       </box>
 
       {/* Position — click an anchor to apply it. */}
-      <box flexDirection="column" gap={1}>
-        <text fg={palette().base} font="bold">Position</text>
-        <box flexDirection="row" flexWrap="wrap" gap={1}>
+      <box flexDirection="column" gap={0}>
+        <text fg={palette().base} attributes={TextAttributes.BOLD}>Position</text>
+        <box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={0}>
           {POSITION_NAMES.map((name) => (
             <Option
               label={POSITION_LABELS[name]}
