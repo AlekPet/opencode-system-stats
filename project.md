@@ -76,6 +76,27 @@ VRAM (использ + свободно), RAM (использ + свободно
       Русская локаль `"79,0 °C"` парсится; берётся `CPU Package`. `readCpuTemp()`
       стал асинхронным, `collectStats()` её `await`. Схема `rpc.ts` и панель
       `tui.tsx` — без правок. Тест: `cpuTempC ≈ 79–82`, `elapsedMs ~300`.
+
+- [x] **2026-11-06**: кроссплатформенная температура CPU — добавлен метод
+       **`systeminformation`** в каскад `readCpuTemp()`: теперь
+       `LHM(HTTP) → systeminformation → sysfs → null`. `systeminformation`
+       ставился через `npm install` (зависимость в `package.json`,
+       `package-lock.json` закоммичен). `readCpuTempSi()` — dynamic
+       `import("systeminformation")` + defensive `try/catch`, читает
+       `cpuTemperature()` → `{main, cores, max}`, берёт `main` (фолбэк на `max`),
+       проверяет `v > 0` и `!NaN`; на WSL2/бездатчах → `null` → фолбэк. Встроен
+       между LHM и sysfs. `null` → панель рисует `—`. Тест: на этом WSL2-хосте
+       `tempC=84` (LHM), `systeminformation` вернул `{main:null,max:null}` →
+       корректный фолбэк; `elapsedMs ~235`. Коммит `bf99f7a`. Документация LHM
+       (фаэр, portproxy, mirrored networking, NAT, `SYSTEM_STATS_LHM_HOST`) в
+       README — раздел «## CPU temperature (LibreHardwareMonitor)».
+
+Спека `systeminformation`: `si.cpuTemperature()` → `{ main, cores[], max }`; при отсутствии
+датчиков `main` = `null` (или `-1` в старых версиях) — проверять. На WSL2 вернёт `null` →
+фолбэк. Числа возвращаются напрямую (русская локаль не проблема, в отличие от LHM).
+Dynamic import нужен, чтобы отсутствие/незагрузка пакета не уронил RPC-процесс; фолбэк на
+`mod.systeminformation ?? mod.default ?? mod`. Тестировать из-под plugin-директории
+(`node_modules` там), иначе `import("systeminformation")` падает с ERR_MODULE_NOT_FOUND.
 - [x] **2026-11-06**: улучшение внешнего вида единого диалога настроек.
       Правки в `tui.tsx` (`Option`/`SettingsBody`/`overlayProps`):
       (1) убраны все псевдо-тултипы `title` (это заголовки рамки, а не подсказки);
