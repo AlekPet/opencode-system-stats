@@ -6,8 +6,10 @@ import type { Stats } from "./rpc.js"
  * Host-side data collection for the system-stats plugin.
  *
  * Every collector is defensive: on any failure it returns a safe fallback so the
- * panel keeps rendering. This WSL host has no thermal zones and no lm-sensors, so
- * CPU temperature resolves to null; other collectors degrade per-field.
+ * panel keeps rendering. CPU temperature is layered across platforms:
+ * LibreHardwareMonitor over HTTP on this WSL2 host (thermal zones are absent in
+ * WSL), sysfs thermal zones on bare Linux — either degrades to null. Other
+ * collectors degrade per-field.
  */
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -132,12 +134,101 @@ async function readCpuLoad(signal?: AbortSignal): Promise<number> {
   }
 }
 
-/**
- * CPU temperature via thermal zones. This WSL has only cooling_device* (no
- * thermal_zone*), so we try zones 0..4 filtered by cpu/core/x86_pkg type and
- * fall back to null. Thermal temps are in milli-Celsius.
- */
-function readCpuTemp(): number | null {
+// --- CPU temperature: layered across platforms -------------------------------
+//
+// The active host is WSL2, where /sys/class/thermal has no thermal_zone* nodes,
+// so the bare-Linux path (readCpuTempSysfs) resolves to null. In WSL2 sensor
+// data lives on the Windows side, so the first method talks to LibreHardware-
+// Monitor's remote web server over HTTP and reads the package/core temp back.
+// On a bare Linux box the sysfs path is used instead.
+
+interface LhmNode {
+  Text: string
+  Value?: string
+  Children?: LhmNode[]
+}
+
+interface LhmSensor {
+  path: string
+  celsius: number
+}
+
+// Hosts to probe, in order. `SYSTEM_STATS_LHM_HOST` forces a single host (e.g.
+// the Windows LAN IP when WSL runs in NAT mode and Windows sits on another
+// subnet). Otherwise try loopback (mirrored networking on Win11 22H2+) and the
+// WSL default gateway (NAT mode) — on this host the gateway (172.25.192.1)
+// answers :8085, reaching LHM on Windows.
+function lhmHosts(): string[] {
+  const explicit = process.env.SYSTEM_STATS_LHM_HOST?.trim()
+  if (explicit) return [explicit]
+  const hosts = ["localhost"]
+  try {
+    const out = run("ip", ["route", "show", "default"], undefined)
+    const gw = out.match(/default via (\S+)/)?.[1]
+    if (gw) hosts.push(gw)
+  } catch {
+    // no routing table / `ip` missing -> loopback only
+  }
+  return hosts
+}
+
+async function fetchLhm(signal?: AbortSignal): Promise<LhmNode | null> {
+  for (const host of lhmHosts()) {
+    const url = `http://${host}:8085/data.json`
+    try {
+      // A short per-host timeout so a down/unreachable LHM never stalls the
+      // refresh loop; any failure falls through to the next candidate.
+      const res = await fetch(url, { signal: AbortSignal.timeout(1500) })
+      if (res.ok) return (await res.json()) as LhmNode
+    } catch {
+      // try next candidate
+    }
+  }
+  return null
+}
+
+// Walk the LHM tree collecting every node whose value is a temperature. Russian
+// locale arrives as "79,0 °C", so parse the first number after normalising the
+// decimal comma.
+function collectLhmSensors(
+  node: LhmNode,
+  path: string[] = [],
+  out: LhmSensor[] = [],
+): LhmSensor[] {
+  const p = [...path, node.Text]
+  const value = node.Value
+  if (value && /°C/i.test(value)) {
+    const m = value.replace(",", ".").match(/(-?\d+(?:\.\d+))/)
+    if (m) out.push({ path: p.join(" / "), celsius: parseFloat(m[1]) })
+  }
+  ;(node.Children || []).forEach((c) => collectLhmSensors(c, p, out))
+  return out
+}
+
+// Prefer the aggregate CPU temperature (Intel "CPU Package", AMD "Tctl/Tdie")
+// over per-core readings and over "Distance to TjMax".
+function pickCpuTemp(sensors: LhmSensor[]): number | null {
+  const ranked = sensors
+    .filter((s) => /CPU Package|Tctl|Tdie/i.test(s.path))
+    .sort((a, b) => cpuRank(a.path) - cpuRank(b.path))
+  return ranked.length ? ranked[0].celsius : null
+}
+function cpuRank(path: string): number {
+  if (/CPU Package|Tctl|Tdie/i.test(path)) return 0
+  if (/Core Average/i.test(path)) return 1
+  return 2
+}
+
+// Method 1: LHM over HTTP (WSL2 / Windows sensor host). async because of fetch.
+async function readCpuTempLhm(signal?: AbortSignal): Promise<number | null> {
+  const tree = await fetchLhm(signal)
+  if (!tree) return null
+  return pickCpuTemp(collectLhmSensors(tree))
+}
+
+// Method 2: bare-Linux thermal zones. Returns null when no cpu/core zone exists
+// (as on this WSL2 host). Temps are stored in milli-Celsius.
+function readCpuTempSysfs(): number | null {
   try {
     for (let i = 0; i < 5; i++) {
       const typePath = `/sys/class/thermal/thermal_zone${i}/type`
@@ -160,10 +251,18 @@ function readCpuTemp(): number | null {
   }
 }
 
+// Layered CPU temperature. Order matters: LHM first (this WSL2 host), then
+// sysfs (bare Linux). Any method returning null is skipped by collectStats.
+async function readCpuTemp(signal?: AbortSignal): Promise<number | null> {
+  const fromLhm = await readCpuTempLhm(signal)
+  if (fromLhm != null) return fromLhm
+  return readCpuTempSysfs()
+}
+
 export async function collectStats(signal?: AbortSignal): Promise<Stats> {
   const gpu = readGpu(signal)
   const ram = readRam()
-  const temp = readCpuTemp()
+  const temp = await readCpuTemp(signal)
   const load = await readCpuLoad(signal)
   return {
     ram,
