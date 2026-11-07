@@ -111,6 +111,11 @@ Dynamic import нужен, чтобы отсутствие/незагрузка 
       Отдельно починено **позиционирование overlay**: `overlayProps` теперь всегда
       возвращает все 4 ключа (`top/bottom/left/right`, лишние = `undefined`), и
       `useTerminalDimensions()` читается как аксессор (`terminal().width`).
+- [x] **2026-11-07: пользовательские темы (custom themes)** — дизайн и решение
+       готовы, код ещё не написан (см. раздел «Пользовательские темы»). Формат
+       YAML + `SYSTEM_STATS_THEME_DIR`, загрузка/валидация на server-половине,
+       мердж в тот же селектор тем. TODO: `js-yaml`, `src/themes.ts`, RPC `themes`,
+       мердж в `tui.tsx`, README.
 
 ### Текущие дефекты OpenTUI (v2.2.5, подтверждены экспериментом)
 
@@ -314,6 +319,83 @@ Dynamic import нужен, чтобы отсутствие/незагрузка 
   дефолт `top-right`) + команды `system-stats` (toggle),
   `system-stats-refresh`, `system-stats-theme`, `system-stats-position`
   (palette/slash). `session.panel` больше не используется.
+
+---
+
+### Пользовательские темы (custom themes) — 2026-11-07
+
+**Запрос:** дать пользователю добавлять свои темы (из файлов) с валидацией и
+выбором в меню настроек. Решение: темы **не хардкодом** в `THEMES`, а подгружаются
+извне и мерджатся в тот же селектор — весь существующий UI (выпадающий список +
+чипы) работает без правок.
+
+**Принятые решения (согласованы с пользователем):**
+- **Формат — YAML** (комментарии в файлах; добавляет зависимость `js-yaml` в
+  server-половину). НЕ JSON.
+- **Папка — отдельная user-путь через `SYSTEM_STATS_THEME_DIR`**, НЕ внутри
+  плагина (не теряется при обновлении плагина).
+- **UI — повторное использование существующего селектора**: выпадающий список
+  (`applyTheme` / `context.ui.dialog.select`) + чипы в `SettingsBody`. Кастомные
+  темы появляются там же, где и встроенные — без нового виджета/слайдера.
+
+**К ключевому факту — у плагина две половины (разные процессы):**
+- **Server** (`src/index.ts` + `stats.ts`) — Node-процесс (`opencode serve
+  --service`), **есть доступ к fs** (там уже читаются `/proc`/`/sys`). Туда
+  кладём чтение/парсинг/валидацию тем.
+- **TUI** (`src/tui.tsx`) — SolidJS-рендер, fs в рантайне ненадёжен. Туда —
+  только готовый список через RPC.
+
+**Дизайн:**
+1. server-половина сканирует `SYSTEM_STATS_THEME_DIR` на `*.yaml`/`*.yml`, читает
+   каждый файл (`js-yaml` `load`), валидирует; невалидные **пропускает с
+   `console.warn`** (с причиной), дубликаты ключей — тоже. Плагин не падает.
+2. RPC-метод `themes` возвращает `{ themes: [{ name, label?, custom: boolean,
+   palette }] }` (в существующих `Stats` или новый контракт — см. ниже).
+3. `themes()` вызывается **один раз на `setup()`** (не в тиках!), location-scoped
+   (`{ location }`), результат мерджится в `THEMES`; `THEME_NAMES` считается
+   пост-мерджом.
+4. TUI: `THEMES` из `Record<ThemeName,...>` → `Record<string,...>`
+   (`themeName: string`); `palette(name)` уже работает по имени.
+
+**Формат файла темы (YAML):**
+```yaml
+# example: ~/.themes/neon.yaml
+name: neon              # необязательно: если нет — берётся _stem_ имени файла
+label: "Neon Green"     # опционально: отображаемое название (иначе label=name)
+palette:
+  bg:     "#001a00"     # фон панели
+  accent:  "#00ff88"    # акцент (заголовки, активная опция)
+  base:    "#99ffcc"    # основной текст
+  muted:   "#2f9966"    # приглушённый текст
+  warn:    "#ccff00"    # предупреждение
+  crit:    "#ff3355"    # критическое
+  border:  "#00ff88"    # рамка
+```
+**Валидация:**
+- `palette` — объект со **всеми 7 полями** `bg/accent/base/muted/warn/crit/border`.
+- каждое значение — валидный hex: `^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`.
+- `name` (или _stem_ файла) — `^[a-z0-9][a-z0-9._-]*$` (безопасно как ключ TS +
+  enum-id; иначе пропуск).
+- `label` — опционально, строка.
+
+**Куда добавить RPC-метод (нерешённый вопрос):**
+- Вариант A — дописать `themes` в существующий контракт `Stats` (один id).
+- Вариант B — новый контракт `Rpc.define({ id:"opencode-system-stats-themes", ...})`.
+  Скорее A (один id): `index.ts` и так регистрирует `Stats`; TUI вызывает
+  `context.client.rpc(<контракт>)`. API `ctx.rpc.register(contract, methods)` —
+  2-й аргумент = map методов (см. «OpenCode API» п. про register).
+
+**DONE (2026-11-07):** весь код пользовательских тем написан, проверен (тест `loadThemes`) и задокументирован (README). Осталось только сделать **commit**. Файлы пока НЕ закоммичены.
+- [x] `js-yaml` — в `dependencies` (`^5.5.0`), ESM-импорт `yaml.load` проверен.
+- [x] `src/themes.ts` — readdir → filter ext → `yaml.load` → validate (7 hex + `name` по `^[a-z0-9][a-z0-9._-]*$`) → dedupe → `{themes}`; `console.warn` на ошибках; defensive `try/catch` вокруг fs/parse.
+- [x] `src/rpc.ts` — метод `themes` (input `{}`, output `{ themes:[...]}`) в `Stats`; тип `CustomTheme` (`{name,label?,custom:bool,palette}`).
+- [x] `src/index.ts` — register — `themes: async () => {themes: loadThemes(env)}`.
+- [x] `src/tui.tsx` — `THEMES`→`Record<string,ThemeEntry>` (мердж built-in + custom), `BUILTIN_THEMES`, `themeName`/`setTheme`/`settings.theme`→`string`; на `setup()` await `.themes({location})`, merge custom, `THEME_NAMES` пост-мердж; `palette()` с фолбэком на built-in.
+- [x] `package-lock.json` — `js-yaml` зафиксирован (+39 строк, `node_modules/js-yaml` 5.5.0).
+- [x] README: раздел «Custom themes (YAML)» — schema, example, `SYSTEM_STATS_THEME_DIR`, rules, error handling, how-it-works; Features + Quick Start обновлены.
+- [x] Тест: 2 YAML (1 валидный + 1 с битым hex) + `.txt` → `themes()` вернул 1, warning на битом, `.txt` пропущен; missing-dir и no-env → `[]` + warning.
+- [ ] Commit всей работы.
+- ⚠️ `SYSTEM_STATS_THEME_DIR` должен быть задан в shell, где запускается OpenCode (server-половина — отдельный процесс); иначе тем нет.
 
 ---
 

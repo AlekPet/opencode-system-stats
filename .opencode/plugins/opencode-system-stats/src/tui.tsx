@@ -10,7 +10,7 @@ import { useTerminalDimensions } from "@opentui/solid";
 import { TextAttributes } from "@opentui/core";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import { Stats } from "./rpc.js";
-import type { Stats as StatsSnapshot } from "./rpc.js";
+import type { Stats as StatsSnapshot, CustomTheme } from "./rpc.js";
 import { formatGB } from "./stats.js";
 
 const PRESETS = [
@@ -36,7 +36,16 @@ interface Palette {
   border: string;
 }
 
-const THEMES: Record<ThemeName, { label: string; p: Palette }> = {
+// One entry in the merged theme map.
+interface ThemeEntry {
+  label: string;
+  p: Palette;
+}
+
+// Built-in phosphor palettes. User themes are merged into the mutable `THEMES`
+// below at setup(), so built-ins and custom share one code path (palette(),
+// applyTheme(), the SettingsBody chips all read `THEMES`/`THEME_NAMES`).
+const BUILTIN_THEMES: Record<ThemeName, ThemeEntry> = {
   amber: {
     label: "Amber CRT",
     p: {
@@ -74,7 +83,15 @@ const THEMES: Record<ThemeName, { label: string; p: Palette }> = {
     },
   },
 };
-const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
+
+// Merged theme map: built-ins plus any user themes from SYSTEM_STATS_THEME_DIR.
+// Mutable at setup() — the custom set is only known then — but read lazily at
+// interaction time, so the selector and chips see the final contents.
+let THEMES: Record<string, ThemeEntry> = {};
+
+// Names of every available theme (built-ins + custom). Seeded to the built-ins;
+// re-derived once after the setup() merge so user themes appear too.
+let THEME_NAMES: string[] = Object.keys(BUILTIN_THEMES);
 
 // Where the floating overlay sits on screen. The `app` slot mounts inside a
 // flexGrow column, so an absolutely-positioned wrapper spans the main area and
@@ -181,8 +198,8 @@ function applyRefreshRate(
 // Shared by the palette command and the panel footer's theme switch.
 function applyTheme(
   context: ReturnType<typeof usePlugin>,
-  themeName: () => ThemeName,
-  setTheme: (name: ThemeName) => void
+  themeName: () => string,
+  setTheme: (name: string) => void
 ) {
   return context.ui.dialog
     .select({
@@ -190,13 +207,13 @@ function applyTheme(
       // `current` must match an option `value` (not its title) to highlight.
       current: themeName(),
       options: THEME_NAMES.map((name) => ({
-        title: THEMES[name].label,
+        title: THEMES[name]?.label ?? name,
         value: name,
       })),
     })
     .then((chosen) => {
       if (chosen) {
-        const next = chosen as ThemeName;
+        const next = chosen as string;
         if (THEMES[next]) setTheme(next);
       }
     });
@@ -249,7 +266,7 @@ export default Plugin.define({
     const [settings, setSettings] = context.storage.store("system-stats", {
       initial: {
         refreshMs: 1000,
-        theme: "amber" as ThemeName,
+        theme: "amber" as string,
         position: "top-right" as Position,
       },
     });
@@ -257,9 +274,9 @@ export default Plugin.define({
     // read as a property (`settings.theme`), never called — calling it threw
     // "settings.theme is not a function" and the plugin crashed in its slot.
     // Falls back to the default if the stored record predates the theme field.
-    const themeName = (): ThemeName =>
-      (settings.theme as ThemeName | undefined) ?? "amber";
-    const setTheme = (name: ThemeName) =>
+    const themeName = (): string =>
+      (settings.theme as string | undefined) ?? "amber";
+    const setTheme = (name: string) =>
       setSettings((draft) => {
         draft.theme = name;
       });
@@ -273,8 +290,9 @@ export default Plugin.define({
     // Whether the floating overlay is visible. Ephemeral (not persisted): the
     // panel is opened on demand via /system-stats, like the DebugOverlay.
     const [visible, setVisible] = createSignal(false);
-    // Resolved palette — re-derives whenever the theme changes.
-    const palette = () => THEMES[themeName()].p;
+    // Resolved palette — re-derives whenever the theme changes. Falls back to a
+    // built-in if a stored/custom name somehow isn't in the map.
+    const palette = () => THEMES[themeName()]?.p ?? BUILTIN_THEMES.amber.p;
     const refreshMs = () => {
       const ms = Number(settings.refreshMs);
       // Never hand `setInterval` a non-positive/NaN delay: `undefined` is
@@ -303,6 +321,41 @@ export default Plugin.define({
     const liveLocation = () =>
       context.location ?? context.data.location.default();
     const setupLocation = liveLocation();
+
+    // Load user custom themes from SYSTEM_STATS_THEME_DIR via the server half.
+    // Called ONCE here (not in the tick loop): the set is stable for the
+    // session and only needed to populate the selector. RPC is location-scoped,
+    // so the location travels in the second arg, like `stats()`. A location
+    // mismatch or RPC failure is non-fatal — fall back to built-ins. Invalid
+    // themes were already filtered + warned on the server side.
+    try {
+      const loaded = (await rpc().themes(
+        {},
+        { location: setupLocation },
+      )) as unknown as { themes?: CustomTheme[] };
+      if (loaded.themes) {
+        for (const t of loaded.themes) {
+          if (t && t.name && t.palette) {
+            THEMES[t.name] = {
+              label: t.label ?? t.name,
+              p: t.palette,
+            };
+          } else {
+            console.warn(
+              "[system-stats] ignoring malformed custom theme from server:",
+              t,
+            );
+          }
+        }
+        THEME_NAMES = Object.keys(THEMES);
+      }
+    } catch (err) {
+      console.warn(
+        "[system-stats] could not load custom themes, using built-ins:",
+        err,
+      );
+    }
+
     const candidateLocations = () => {
       const list = [setupLocation, liveLocation()].filter(
         (loc): loc is NonNullable<typeof loc> => loc != null
@@ -531,9 +584,9 @@ function Panel(props: {
   refreshMs: () => number;
   setRefreshMs: (ms: number) => void;
   palette: () => Palette;
-  themeName: () => ThemeName;
+  themeName: () => string;
   position: () => Position;
-  setTheme: (name: ThemeName) => void;
+  setTheme: (name: string) => void;
   setPosition: (p: Position) => void;
   openSettings: () => void;
 }) {
@@ -674,7 +727,7 @@ function Panel(props: {
             width={cols}
             borderColor={palette().border}
             backgroundColor={palette().bg}
-            title={" " + safeString(THEMES[themeName()].label + " ")}
+            title={" " + safeString(THEMES[themeName()]?.label + " ")}
             onMouseUp={() => void openSettings()}
           >
             <box flexDirection="column" gap={0} marginY={1}>
@@ -787,8 +840,8 @@ function Option(props: {
 // so a change here applies to the panel immediately. `usePlugin` gives the close
 // button access to `dialog.clear`.
 function SettingsBody(props: {
-  themeName: () => ThemeName;
-  setTheme: (name: ThemeName) => void;
+  themeName: () => string;
+  setTheme: (name: string) => void;
   position: () => Position;
   setPosition: (p: Position) => void;
   refreshMs: () => number;
@@ -850,7 +903,7 @@ function SettingsBody(props: {
         <box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={0}>
           {THEME_NAMES.map((name) => (
             <Option
-              label={THEMES[name].label}
+              label={THEMES[name]?.label ?? name}
               active={name === props.themeName()}
               onSelect={() => props.setTheme(name)}
             />

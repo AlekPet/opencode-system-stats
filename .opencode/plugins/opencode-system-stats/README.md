@@ -16,7 +16,8 @@ TUI, with a configurable refresh rate.
   (`200 / 500 / 1000 / 2000 / 5000` ms), persisted across sessions.
 - **Floating overlay** that can sit in any corner or at the top/bottom centre of
   the screen (six anchors, persisted), like the built-in debug overlay.
-- **Three phosphor themes** (`amber`, `green`, `mono`), persisted.
+- **Three phosphor themes** (`amber`, `green`, `mono`), persisted. Add your own
+  with YAML files (see [Custom themes](#custom-themes-yaml)).
 - Graceful degradation: any field that can't be read falls back to a safe
   default, so the panel never crashes.
 
@@ -66,6 +67,7 @@ To quickly get started with the system stats plugin:
    - `/system-stats` - Toggle the floating stats overlay open/closed
    - `/system-stats-refresh` - Change the refresh rate (200/500/1000/2000/5000 ms)
    - `/system-stats-theme` - Switch between amber, green, or mono themes
+      (plus any [custom themes](#custom-themes-yaml))
    - `/system-stats-position` - Move the overlay to different screen positions
 
 4. **To see the stats panel**, type `/system-stats` in the command palette (Ctrl+P) or use the slash command directly
@@ -86,6 +88,77 @@ To quickly get started with the system stats plugin:
 - **TUI part** (`src/tui.tsx`) polls the RPC on a timer while the overlay is
   visible and renders it into the root `app` slot as an absolutely-positioned
   overlay (six anchors), instead of a host-docked `session.panel`.
+
+## Custom themes (YAML)
+
+Beyond the three built-in phosphor palettes, you can add your own themes with
+plain YAML files. Themes live **outside the plugin directory** (in a separate
+user folder) so they survive plugin updates.
+
+### Setup
+
+1. **Pick a theme directory** anywhere you like, e.g. `~/.config/system-stats-themes`.
+2. **Set the `SYSTEM_STATS_THEME_DIR` environment variable** to that directory:
+   ```bash
+   export SYSTEM_STATS_THEME_DIR="$HOME/.config/system-stats-themes"
+   ```
+   ⚠️ Set it in the **shell where you launch OpenCode** — the theme directory is
+   read by the server half, which is a separate process. If the variable isn't
+   set (or the directory is missing), the plugin simply falls back to the
+   built-in themes.
+3. **Restart OpenCode** (service + TUI) so the new themes appear.
+4. Add one theme per YAML/YML file in that directory (see schema below).
+
+The themes are loaded once at startup and merged into the same selector you use
+for the built-in themes — no new widget, just more options in the theme list
+(`/system-stats-theme` or the panel footer).
+
+### File schema
+
+Each file is one theme:
+
+```yaml
+name: sunset        # optional; id used by the selector
+label: Sunset CRT   # optional; shown in the list (defaults to `name`)
+palette:
+  bg: "#1a0a00"     # background
+  accent: "#ff7b00" # highlighted accents / active chips
+  base: "#ffb36b"   # primary text
+  muted: "#a85d00"  # labels
+  warn: "#ffb000"   # warning values
+  crit: "#ff3b2f"   # critical values
+  border: "#ff7b00" # panel borders
+```
+
+Rules:
+
+- **`palette` is required** and must define **all seven** fields: `bg`,
+  `accent`, `base`, `muted`, `warn`, `crit`, `border`.
+- Every palette value must be a hex color: `#fff` or `#ff8800` (3- or 6-digit).
+- **`name`** is the selector id; it must match `^[a-z0-9][a-z0-9._-]*$` (lowercase,
+  starts with a letter or digit). If omitted, the filename stem is used
+  (`sunset.yml` → `sunset`).
+- **`label`** is optional; it defaults to `name`.
+
+### Errors are non-fatal
+
+A bad file is skipped with a warning in the service log and doesn't affect the
+others:
+
+- missing or malformed YAML,
+- `palette` missing any of the seven fields or with a non-hex value,
+- `name` not matching the id pattern.
+
+If two files resolve to the same `name`, the first one (alphabetically) wins and
+the rest are skipped with a warning.
+
+### How it works
+
+Themes are scanned, parsed and validated on the **server half** (`src/themes.ts`),
+which has filesystem access and `js-yaml`. The validated list is exposed to the
+TUI half over a location-scoped RPC call (`src/rpc.ts`), then merged into the
+existing theme map at setup (`src/tui.tsx`) so the built-in and custom themes
+share one code path.
 
 ## CPU temperature (LibreHardwareMonitor)
 

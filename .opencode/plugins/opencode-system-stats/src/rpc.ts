@@ -22,6 +22,30 @@ export interface Stats {
 }
 
 /**
+ * A user-supplied custom theme, loaded from a YAML file and validated on the
+ * server half, then exposed to the TUI half via the `themes` method. Ties to the
+ * TUI's local `Palette` by shape (the same 7 hex fields).
+ */
+export interface CustomTheme {
+  /** Stable unique id (`^[a-z0-9][a-z0-9._-]*$`); the selector `value`. */
+  name: string
+  /** Human-readable name in the selector; falls back to `name`. */
+  label?: string
+  /** Always `true` — marks it as a user theme, not a built-in palette. */
+  custom: boolean
+  /** The 7-field phosphor palette. */
+  palette: {
+    bg: string
+    accent: string
+    base: string
+    muted: string
+    warn: string
+    crit: string
+    border: string
+  }
+}
+
+/**
  * RPC contract shared between the server part (implements) and the TUI part
  * (calls). The plugin `id` comes from the server part's `Plugin.define`; this
  * `id` only identifies the contract itself.
@@ -78,6 +102,38 @@ export const Stats = Rpc.define({
           collectedAt: { type: "number" },
         },
         required: ["ram", "cpu", "gpu", "collectedAt"],
+        additionalProperties: false,
+      },
+    },
+    themes: {
+      // No arguments; `input` is present for the same schema-decoding reason as
+      // `stats` above.
+      input: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      // One entry per valid user theme. The TUI validates each entry's shape
+      // before use, so the item schema stays loose (object) rather than
+      // re-declaring the palette.
+      output: {
+        type: "object",
+        properties: {
+          themes: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                label: { type: ["string", "null"] },
+                custom: { type: "boolean" },
+              },
+              required: ["name", "custom"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["themes"],
         additionalProperties: false,
       },
     },
