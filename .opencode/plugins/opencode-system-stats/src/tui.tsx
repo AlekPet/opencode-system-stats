@@ -85,9 +85,11 @@ const BUILTIN_THEMES: Record<ThemeName, ThemeEntry> = {
 };
 
 // Merged theme map: built-ins plus any user themes from SYSTEM_STATS_THEME_DIR.
-// Mutable at setup() — the custom set is only known then — but read lazily at
-// interaction time, so the selector and chips see the final contents.
-let THEMES: Record<string, ThemeEntry> = {};
+// Seeded with the built-ins so the selector always has options even when no
+// custom themes load (missing dir, RPC failure, empty list). Mutable at setup()
+// — the custom set is only known then — but read lazily at interaction time, so
+// the selector and chips see the final contents.
+const THEMES: Record<string, ThemeEntry> = { ...BUILTIN_THEMES };
 
 // Names of every available theme (built-ins + custom). Seeded to the built-ins;
 // re-derived once after the setup() merge so user themes appear too.
