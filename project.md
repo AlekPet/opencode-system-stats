@@ -394,7 +394,7 @@ palette:
 - [x] `package-lock.json` — `js-yaml` зафиксирован (+39 строк, `node_modules/js-yaml` 5.5.0).
 - [x] README: раздел «Custom themes (YAML)» — schema, example, `SYSTEM_STATS_THEME_DIR`, rules, error handling, how-it-works; Features + Quick Start обновлены.
 - [x] Тест: 2 YAML (1 валидный + 1 с битым hex) + `.txt` → `themes()` вернул 1, warning на битом, `.txt` пропущен; missing-dir и no-env → `[]` + warning.
-- [ ] Commit всей работы.
+- [x] Commit всей работы — `1499198` (feat(system-stats): custom themes; 8 файлов, themes.ts + rpc.ts + index.ts + tui.tsx + README + package*). `_shot.ps1` не коммичен (сторонний).
 - ⚠️ `SYSTEM_STATS_THEME_DIR` должен быть задан в shell, где запускается OpenCode (server-половина — отдельный процесс); иначе тем нет.
 
 ---
