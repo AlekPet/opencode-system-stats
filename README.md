@@ -1,5 +1,7 @@
 # opencode-system-stats
 
+![Three built-in phosphor themes — Amber CRT, Green Phosphor, Mono IBM](screenshot-system-stats.png)
+
 A local [OpenCode](https://opencode.ai) plugin that renders a real-time system
 stats panel **directly in the OpenCode TUI** — VRAM, RAM, CPU load, and GPU/CPU
 temperature — as a floating overlay you can drop in any corner of the screen.
@@ -7,8 +9,6 @@ Refresh rate and palette are configurable, and you can add your own themes with
 plain YAML files.
 
 ![Panels](https://img.shields.io/badge/live-updating-ff8800)
-
-![Three built-in phosphor themes — Amber CRT, Green Phosphor, Mono IBM](screenshot-system-stats.png)
 
 ## Features
 
