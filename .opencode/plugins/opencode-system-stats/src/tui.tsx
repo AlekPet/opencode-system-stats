@@ -2,6 +2,7 @@ import {
   Show,
   createSignal,
   createEffect,
+  createMemo,
   createContext,
   useContext,
   onCleanup,
@@ -768,20 +769,29 @@ function Panel(props: {
   // of the natural width — the only real "zoom" available (OpenTUI renders
   // glyphs at a fixed cell size), so it resizes the panel's footprint, not the
   // text. The outer clamp keeps even a large scale from going off-screen.
-  const unscaledCols = Math.min(
-    BASE_MAX_COLS,
-    Math.max(BASE_MIN_COLS, contentCols() + PADDING * 2 + FRAME)
+  //
+  // Both are memos, not plain consts: a Solid component body runs ONCE, so a
+  // `const cols = …scale()…` would freeze at the first render and `width={cols}`
+  // would never change when the user picks another scale. Reading `cols()` in
+  // the JSX/effect keeps `scale` (and the content width) tracked.
+  const unscaledCols = createMemo(() =>
+    Math.min(
+      BASE_MAX_COLS,
+      Math.max(BASE_MIN_COLS, contentCols() + PADDING * 2 + FRAME)
+    )
   );
-  const cols = clampInt(
-    Math.round(unscaledCols * scale() / 100),
-    MIN_COLS,
-    MAX_COLS
+  const cols = createMemo(() =>
+    clampInt(
+      Math.round(unscaledCols() * scale() / 100),
+      MIN_COLS,
+      MAX_COLS
+    )
   );
 
   // Report the live footprint so the settings dialog can resolve the opposite
   // edge for the right/centre/bottom corner presets.
   createEffect(() => {
-    setMetrics({ cols, rows: PANEL_ROWS });
+    setMetrics({ cols: cols(), rows: PANEL_ROWS });
   });
 
   return (
@@ -793,7 +803,7 @@ function Panel(props: {
         {...overlayProps(
           posLeft(),
           posTop(),
-          cols,
+          cols(),
           PANEL_ROWS,
           terminal().width,
           terminal().height
@@ -822,7 +832,7 @@ function Panel(props: {
             border
             borderStyle="double"
             padding={PADDING}
-            width={cols}
+            width={cols()}
             borderColor={palette().border}
             backgroundColor={palette().bg}
             title={" " + safeString(THEMES[themeName()]?.label + " ")}
@@ -1108,23 +1118,25 @@ function SettingsBody(props: {
             />
           ))}
         </box>
-        <box
-          flexDirection="row"
-          flexWrap="wrap"
-          columnGap={2}
-          rowGap={0}
-          marginTop={0}
-        >
-          <Stepper
-            label="Left"
-            value={props.posLeft()}
-            onChange={props.setPosLeft}
-          />
-          <Stepper
-            label="Top"
-            value={props.posTop()}
-            onChange={props.setPosTop}
-          />
+        <box flexDirection="column" gap={0} marginTop={1}>
+          <text fg={palette().base} attributes={TextAttributes.BOLD}>Custom position</text>
+          <box
+            flexDirection="row"
+            flexWrap="wrap"
+            columnGap={1}
+            rowGap={0}
+          >
+            <Stepper
+              label="Left"
+              value={props.posLeft()}
+              onChange={props.setPosLeft}
+            />
+            <Stepper
+              label="Top"
+              value={props.posTop()}
+              onChange={props.setPosTop}
+            />
+          </box>
         </box>
       </box>
     </box>
