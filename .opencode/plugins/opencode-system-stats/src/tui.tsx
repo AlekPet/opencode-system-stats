@@ -311,7 +311,7 @@ export default Plugin.define({
         // `scale` is kept in the initial shape only to migrate records written
         // by the old percent-based Size control (see `density` below).
         scale: 100 as number,
-        density: "normal" as Density,
+        density: "spacious" as Density,
       },
     });
     // Persisted theme name. `settings` is a reactive Solid store, so `theme` is
