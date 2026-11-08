@@ -651,9 +651,9 @@ function Panel(props: {
     const ageSec = Math.max(0, Math.floor((now() - snap.collectedAt) / 1000));
     // Drop the ambiguous "только что" wording; show relative time only once
     // at least a second has passed (the "● LIVE" dot already conveys freshness).
-    // Keep it short (`5с`, not `обновлено 5с назад`) so the footer never wraps
+    // Keep it short (`5s`, not `obnovleno 5s nazad`) so the footer never wraps
     // in the panel's narrow content column.
-    return ageSec < 1 ? null : `${ageSec}с`;
+    return ageSec < 1 ? null : `${ageSec}s`;
   };
 
   // Color a numeric value by severity band. Falls back to muted when unavailable.

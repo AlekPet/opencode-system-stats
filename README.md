@@ -8,6 +8,8 @@ plain YAML files.
 
 ![Panels](https://img.shields.io/badge/live-updating-ff8800)
 
+![Three built-in phosphor themes — Amber CRT, Green Phosphor, Mono IBM](screenshot-system-stats.png)
+
 ## Features
 
 - **VRAM** used / total + utilization and temperature (color-coded bands).
