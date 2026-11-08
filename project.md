@@ -396,7 +396,7 @@ palette:
 - [x] Тест: 2 YAML (1 валидный + 1 с битым hex) + `.txt` → `themes()` вернул 1, warning на битом, `.txt` пропущен; missing-dir и no-env → `[]` + warning.
 - [x] Commit всей работы — `1499198` (feat(system-stats): custom themes; 8 файлов, themes.ts + rpc.ts + index.ts + tui.tsx + README + package*). `_shot.ps1` не коммичен (сторонний).
 - ⚠️ `SYSTEM_STATS_THEME_DIR` должен быть задан в shell, где запускается OpenCode (server-половина — отдельный процесс); иначе тем нет.
-- [x] **Баг-фикс (2026-11-08):** built-in темы (amber/green/mono) НЕ показывались в селекторе — `THEMES` стартовал пустым `{}` и в него мерджились только кастомные. Исправлено: `THEMES = { ...BUILTIN_THEMES }` (seed), кастомные добавляются сверху. `eb56855`. 12 пресловутых TS2722 в tui.tsx — pre-existing baseline, не наши.
+- [x] README: добавлен `Tutorial: create your first theme` (после Setup) — пошагово: dir → `sunset.yml` (7 полей palette) → `SYSTEM_STATS_THEME_DIR` → рестарт → verify; таблица `Picking the colors` (маппинг полей на реальное использование в tui.tsx) + готовая палитра amber для копирования. Коммит `7f20a1f`.- [x] **Баг-фикс (2026-11-08):** built-in темы (amber/green/mono) НЕ показывались в селекторе — `THEMES` стартовал пустым `{}` и в него мерджились только кастомные. Исправлено: `THEMES = { ...BUILTIN_THEMES }` (seed), кастомные добавляются сверху. `eb56855`. 12 пресловутых TS2722 в tui.tsx — pre-existing baseline, не наши.
 ---
 
 ## Эксплуатация: перезапуск
