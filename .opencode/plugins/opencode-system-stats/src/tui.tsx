@@ -21,6 +21,13 @@ const PRESETS = [
   { value: 5000, label: "5000 ms" },
 ];
 
+// Clamp an integer to an inclusive range. Used for the panel's free offsets
+// (cells from the top-left corner) so a stored value can't place the panel
+// off-screen or negative.
+function clampInt(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
 // Retro 70s–90s early-computer phosphor palettes. Each theme is self-contained
 // (no dependency on the host OS theme) so the "live terminal" look holds on
 // dark or light hosts alike.
@@ -95,10 +102,21 @@ const THEMES: Record<string, ThemeEntry> = { ...BUILTIN_THEMES };
 // re-derived once after the setup() merge so user themes appear too.
 let THEME_NAMES: string[] = Object.keys(BUILTIN_THEMES);
 
-// Where the floating overlay sits on screen. The `app` slot mounts inside a
-// flexGrow column, so an absolutely-positioned wrapper spans the main area and
-// aligns the panel to one of six anchors (corners or top/bottom centre).
-type Position =
+// User-settable scale presets for the panel width. OpenTUI renders glyphs at a
+// fixed cell size (no font scaling), so "scale" resizes the panel's footprint
+// in columns, not the text. Kept as plain data so the selector and the body
+// share one source of truth.
+const SCALE_OPTIONS = [
+  { value: 80, label: "80%" },
+  { value: 100, label: "100%" },
+  { value: 125, label: "125%" },
+  { value: 150, label: "150%" },
+];
+
+// The six anchor presets offered as quick one-click placements. The actual
+// position is two free offsets (`posLeft`/`posTop` in cells from the top-left
+// corner); these presets just set both offsets at once to a corner.
+type Corner =
   | "top-left"
   | "top-center"
   | "top-right"
@@ -106,7 +124,7 @@ type Position =
   | "bottom-center"
   | "bottom-right";
 
-const POSITION_LABELS: Record<Position, string> = {
+const CORNER_LABELS: Record<Corner, string> = {
   "top-left": "Top left",
   "top-center": "Top center",
   "top-right": "Top right",
@@ -114,57 +132,42 @@ const POSITION_LABELS: Record<Position, string> = {
   "bottom-center": "Bottom center",
   "bottom-right": "Bottom right",
 };
-const POSITION_NAMES = Object.keys(POSITION_LABELS) as Position[];
-const POSITION_OPTIONS = POSITION_NAMES.map((name) => ({
-  title: POSITION_LABELS[name],
+const CORNERS = Object.keys(CORNER_LABELS) as Corner[];
+const CORNER_OPTIONS = CORNERS.map((name) => ({
+  title: CORNER_LABELS[name],
   value: name,
 }));
 
-// Absolute props that pin the overlay wrapper to one of the six anchors. The
-// wrapper is positioned directly with a single top/bottom and a single
-// left/right, so it occupies ONLY the panel's own bounding box. The previous
-// full-width wrapper (`left:0; right:0`) spanned the entire terminal width and
-// intercepted clicks on everything behind and beside the panel — that is the
-// "blocks interaction" bug. For the centre anchors the left offset is derived
-// from the terminal width (cells) via `useTerminalDimensions`, so the panel
-// stays centred without a full-width box.
-function overlayProps(position: Position, cols: number, width: number) {
+// Absolute props that pin the overlay wrapper at a free cell offset from the
+// terminal's top-left corner. `posLeft`/`posTop` are the user-set offsets in
+// cells; `cols`/`rows` are the panel's footprint so we can clamp it on-screen.
+// The wrapper is positioned directly with a single `top` and a single `left`,
+// so it occupies ONLY the panel's own bounding box (a full-width wrapper used
+// to span the whole terminal and intercept clicks behind it — the "blocks
+// interaction" bug). `bottom`/`right` are always returned too: @opentui/solid's
+// `spread` only iterates the keys of the NEXT props object and never deletes
+// disappeared keys, so a partial object would leave stale edges and pin the
+// panel in the wrong place. Keys set to `undefined` are cleared by the setters.
+function overlayProps(
+  posLeft: number,
+  posTop: number,
+  cols: number,
+  rows: number,
+  terminalCols: number,
+  terminalRows: number
+) {
   const inset = 1;
-  const centerX = Math.max(inset, Math.floor((width - cols) / 2));
-  // IMPORTANT: always return ALL four positional keys, even when unused.
-  // @opentui/solid's `spread` only iterates the keys of the NEXT props object;
-  // it never deletes keys that disappeared. Returning a partial object (e.g.
-  // `{top,right}` → `{bottom,left}`) therefore left the old `top`/`right` in
-  // place, over-constraining the absolute box so the panel never moved. Keys
-  // explicitly set to `undefined` are cleared by the renderable setters.
-  const anchor: {
-    top?: number;
-    bottom?: number;
-    left?: number;
-    right?: number;
-  } = (() => {
-    switch (position) {
-      case "top-left":
-        return { top: inset, left: inset };
-      case "top-right":
-        return { top: inset, right: inset };
-      case "top-center":
-        return { top: inset, left: centerX };
-      case "bottom-left":
-        return { bottom: inset, left: inset };
-      case "bottom-center":
-        return { bottom: inset, left: centerX };
-      default:
-        return { bottom: inset, right: inset };
-    }
-  })();
+  // Clamp so the panel never scrolls off-screen, even for a stored offset that
+  // predates the current terminal size or a wider-than-panel value.
+  const clampedLeft = clampInt(posLeft, 0, Math.max(0, terminalCols - cols));
+  const clampedTop = clampInt(posTop, 0, Math.max(0, terminalRows - rows));
   return {
     position: "absolute" as const,
     zIndex: 2600,
-    top: anchor.top,
-    bottom: anchor.bottom,
-    left: anchor.left,
-    right: anchor.right,
+    top: clampedTop,
+    bottom: undefined,
+    left: clampedLeft,
+    right: undefined,
   };
 }
 
@@ -221,22 +224,38 @@ function applyTheme(
     });
 }
 
-// Open the position selector and persist the chosen anchor.
-function applyPosition(
-  context: ReturnType<typeof usePlugin>,
-  position: () => Position,
-  setPosition: (p: Position) => void
-) {
-  return context.ui.dialog
-    .select({
-      title: "Stats position",
-      current: position(),
-      options: POSITION_OPTIONS,
-    })
-    .then((chosen) => {
-      if (chosen && POSITION_LABELS[chosen as Position])
-        setPosition(chosen as Position);
-    });
+// Open the position selector and persist the chosen anchor via a corner preset.
+// Needs the terminal size and the panel's footprint to resolve the opposite
+// edge for right/bottom anchors, so it takes them as arguments. Returns the
+// new posLeft/posTop so callers can persist them.
+function cornerOffsets(
+  corner: Corner,
+  cols: number,
+  rows: number,
+  terminalCols: number,
+  terminalRows: number
+): { posLeft: number; posTop: number } {
+  const inset = 1;
+  switch (corner) {
+    case "top-left":
+      return { posLeft: inset, posTop: inset };
+    case "top-right":
+      return { posLeft: terminalCols - cols - inset, posTop: inset };
+    case "top-center":
+      return {
+        posLeft: Math.max(inset, Math.floor((terminalCols - cols) / 2)),
+        posTop: inset,
+      };
+    case "bottom-left":
+      return { posLeft: inset, posTop: terminalRows - rows - inset };
+    case "bottom-center":
+      return {
+        posLeft: Math.max(inset, Math.floor((terminalCols - cols) / 2)),
+        posTop: terminalRows - rows - inset,
+      };
+    default:
+      return { posLeft: terminalCols - cols - inset, posTop: terminalRows - rows - inset };
+  }
 }
 
 function fmtTemp(c: number | null): string {
@@ -269,7 +288,9 @@ export default Plugin.define({
       initial: {
         refreshMs: 1000,
         theme: "amber" as string,
-        position: "top-right" as Position,
+        posLeft: 1 as number,
+        posTop: 1 as number,
+        scale: 100 as number,
       },
     });
     // Persisted theme name. `settings` is a reactive Solid store, so `theme` is
@@ -282,16 +303,39 @@ export default Plugin.define({
       setSettings((draft) => {
         draft.theme = name;
       });
-    // Persisted overlay anchor (falls back if the stored record predates it).
-    const position = (): Position =>
-      (settings.position as Position | undefined) ?? "top-right";
-    const setPosition = (p: Position) =>
+    // Persisted overlay offset from the top-left corner, in cells. Two numbers
+    // replace the old single `Position` anchor: they give free placement
+    // anywhere; the six corner presets in SettingsBody just set both at once.
+    // Falls back to the inset corner if the stored record predates them.
+    const posLeft = (): number => (settings.posLeft as number | undefined) ?? 1;
+    const posTop = (): number => (settings.posTop as number | undefined) ?? 1;
+    const setPosLeft = (v: number) =>
       setSettings((draft) => {
-        draft.position = p;
+        draft.posLeft = clampInt(v, 0, Number.MAX_SAFE_INTEGER);
+      });
+    const setPosTop = (v: number) =>
+      setSettings((draft) => {
+        draft.posTop = clampInt(v, 0, Number.MAX_SAFE_INTEGER);
+      });
+    // Persisted panel width scale, as a percent of the natural width. Read as a
+    // property (reactive store); falls back to 100% for older records.
+    const scale = (): number => (settings.scale as number | undefined) ?? 100;
+    const setScale = (v: number) =>
+      setSettings((draft) => {
+        draft.scale = clampInt(v, 50, 200);
       });
     // Whether the floating overlay is visible. Ephemeral (not persisted): the
     // panel is opened on demand via /system-stats, like the DebugOverlay.
     const [visible, setVisible] = createSignal(false);
+    // Live panel footprint (cols×rows in cells), reported by the rendered Panel.
+    // The settings dialog reads it to resolve the opposite edge for the
+    // right/centre/bottom corner presets — those offsets depend on the panel's
+    // width/height against the terminal size. Defaults cover the brief window
+    // before the first render.
+    const [panelMetrics, setPanelMetrics] = createSignal<{
+      cols: number;
+      rows: number;
+    }>({ cols: 40, rows: 20 });
     // Resolved palette — re-derives whenever the theme changes. Falls back to a
     // built-in if a stored/custom name somehow isn't in the map.
     const palette = () => THEMES[themeName()]?.p ?? BUILTIN_THEMES.amber.p;
@@ -479,7 +523,10 @@ export default Plugin.define({
       ],
     }));
 
-    // Command: choose the overlay anchor (corner / top-bottom centre).
+    // Command: open the unified settings dialog (position, size, theme,
+    // refresh rate). Position/size need the live panel footprint + terminal
+    // size, which only exist inside the dialog, so the dialog is the single
+    // place to edit them.
     context.keymap.layer(() => ({
       mode: "global",
       commands: [
@@ -489,7 +536,7 @@ export default Plugin.define({
           palette: true,
           slash: { name: "system-stats-position" },
           run: () => {
-            void applyPosition(context, position, setPosition);
+            void openSettings();
           },
         },
       ],
@@ -522,8 +569,13 @@ export default Plugin.define({
           <SettingsBody
             themeName={themeName}
             setTheme={setTheme}
-            position={position}
-            setPosition={setPosition}
+            scale={scale}
+            setScale={setScale}
+            metrics={panelMetrics}
+            posLeft={posLeft}
+            setPosLeft={setPosLeft}
+            posTop={posTop}
+            setPosTop={setPosTop}
             refreshMs={refreshMs}
             setRefreshMs={setRefreshMs}
           />
@@ -553,9 +605,12 @@ export default Plugin.define({
                 setRefreshMs={setRefreshMs}
                 palette={palette}
                 themeName={themeName}
-                position={position}
-                setTheme={setTheme}
-                setPosition={setPosition}
+                scale={scale}
+                setScale={setScale}
+                metrics={panelMetrics}
+                setMetrics={setPanelMetrics}
+                posLeft={posLeft}
+                posTop={posTop}
                 openSettings={openSettings}
               />
             </Show>
@@ -587,9 +642,12 @@ function Panel(props: {
   setRefreshMs: (ms: number) => void;
   palette: () => Palette;
   themeName: () => string;
-  position: () => Position;
-  setTheme: (name: string) => void;
-  setPosition: (p: Position) => void;
+  scale: () => number;
+  setScale: (v: number) => void;
+  metrics: () => { cols: number; rows: number };
+  setMetrics: (m: { cols: number; rows: number }) => void;
+  posLeft: () => number;
+  posTop: () => number;
   openSettings: () => void;
 }) {
   const context = usePlugin();
@@ -602,14 +660,18 @@ function Panel(props: {
   const setRefreshMs = props.setRefreshMs;
   const palette = props.palette;
   const themeName = props.themeName;
-  const position = props.position;
-  // `setTheme`/`setPosition` are stable setter functions (not reactive
+  const scale = props.scale;
+  const metrics = props.metrics;
+  // `setScale`/`setMetrics` are stable setter functions (not reactive
   // accessors), so destructuring them is safe — same as `setRefreshMs` above.
-  const setTheme = props.setTheme;
-  const setPosition = props.setPosition;
+  const setScale = props.setScale;
+  const setMetrics = props.setMetrics;
   // `openSettings` is a stable function (created once in setup), so it is safe
   // to destructure here like the other setters above.
   const openSettings = props.openSettings;
+  // Position is read (not set) here; setters live in the dialog.
+  const posLeft = props.posLeft;
+  const posTop = props.posTop;
 
   // Helper to safely get nested properties with fallbacks
   const safeGet = (obj: any, path: string, fallback: any = "—") => {
@@ -634,8 +696,18 @@ function Panel(props: {
   // Inner padding per side and the bordered frame it adds to the width.
   const PADDING = 1; // was 2 — tighter panel
   const FRAME = 2; // left + right border
-  const MIN_COLS = 32;
-  const MAX_COLS = 52;
+  // Natural (unscaled) width is clamped to this base range so scale=100%
+  // renders exactly as before. `scale` then multiplies it and the outer clamp
+  // lets the footprint drift a little beyond the base range (24–64 cols).
+  const BASE_MIN_COLS = 32;
+  const BASE_MAX_COLS = 52;
+  const MIN_COLS = 24;
+  const MAX_COLS = 64;
+
+  // Approximate panel height in rows. Values never wrap (the width always fits
+  // the widest line), so the row count is fixed; this is only used to keep
+  // bottom-anchored placements on-screen.
+  const PANEL_ROWS = 20;
 
   // Force a re-render once per second so "updated Ns ago" keeps ticking even
   // between successful refreshes. Reads a plain, non-reactive local tick value
@@ -679,7 +751,7 @@ function Panel(props: {
   // in the monospace renderer, so string length is a good proxy.
   const contentCols = (): number => {
     const snap = latest();
-    if (!snap) return MIN_COLS;
+    if (!snap) return BASE_MIN_COLS;
     const lines = [
       `GPU    ${safeString(snap.gpu?.name)}`,
       `  VRAM ${safeString(snap.gpu?.usedMiB)} / ${safeString(snap.gpu?.totalMiB)} MiB`,
@@ -690,19 +762,43 @@ function Panel(props: {
       `CPU    ${Math.round(snap.cpu?.loadPct ?? 0)}%`,
       `  Temp ${fmtTemp(snap.cpu?.tempC)}`,
     ];
-    return Math.max(MIN_COLS, ...lines.map((l) => l.length));
+    return Math.max(BASE_MIN_COLS, ...lines.map((l) => l.length));
   };
-  const cols = Math.min(
-    MAX_COLS,
-    Math.max(MIN_COLS, contentCols() + PADDING * 2 + FRAME)
+  // Natural width clamped to the base range, then scaled. `scale` is a percent
+  // of the natural width — the only real "zoom" available (OpenTUI renders
+  // glyphs at a fixed cell size), so it resizes the panel's footprint, not the
+  // text. The outer clamp keeps even a large scale from going off-screen.
+  const unscaledCols = Math.min(
+    BASE_MAX_COLS,
+    Math.max(BASE_MIN_COLS, contentCols() + PADDING * 2 + FRAME)
   );
+  const cols = clampInt(
+    Math.round(unscaledCols * scale() / 100),
+    MIN_COLS,
+    MAX_COLS
+  );
+
+  // Report the live footprint so the settings dialog can resolve the opposite
+  // edge for the right/centre/bottom corner presets.
+  createEffect(() => {
+    setMetrics({ cols, rows: PANEL_ROWS });
+  });
 
   return (
     <paletteCtx.Provider value={palette}>
-      {/* Floating overlay anchored by `position`: the wrapper is absolute
-          inside the app slot's flexGrow area and aligns the fixed-width panel
-          left / centre / right on the top or bottom edge. */}
-      <box {...overlayProps(position(), cols, terminal().width)}>
+      {/* Floating overlay at the user-set free offset: the wrapper is absolute
+          inside the app slot's flexGrow area and sits `posLeft`/`posTop` cells
+          from the top-left corner, clamped on-screen by `overlayProps`. */}
+      <box
+        {...overlayProps(
+          posLeft(),
+          posTop(),
+          cols,
+          PANEL_ROWS,
+          terminal().width,
+          terminal().height
+        )}
+      >
         <Show
           // Compare to `null` (not pass the snapshot itself) so the tree is built
           // once and only its reactive attributes update on each refresh.
@@ -834,6 +930,41 @@ function Option(props: {
   );
 }
 
+// A tiny [-] N [+] stepper for the panel's free offsets (cells from the top-left
+// corner). The label names the axis; the centre value is a plain read-only
+// field; [-]/[+] nudge it by one cell. Reports each change via `onChange`.
+function Stepper(props: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const palette = useContext(paletteCtx);
+  return (
+    <box flexDirection="row" alignItems="center" columnGap={0}>
+      <text fg={palette().muted} marginTop={0}>
+        {props.label}
+      </text>
+      <box
+        onMouseUp={() => props.onChange(props.value - 1)}
+        paddingX={1}
+        marginLeft={1}
+      >
+        <text fg={palette().base}>-</text>
+      </box>
+      <box width={4} textAlign="center" marginLeft={1}>
+        <text fg={palette().base}>{props.value}</text>
+      </box>
+      <box
+        onMouseUp={() => props.onChange(props.value + 1)}
+        paddingX={1}
+        marginLeft={1}
+      >
+        <text fg={palette().base}>+</text>
+      </box>
+    </box>
+  );
+}
+
 // The unified settings dialog body: refresh rate, theme and position are all
 // edited in ONE window, replacing the three separate `/system-stats-*`
 // commands. Each option is a compact one-line chip (two per row); the current
@@ -844,15 +975,42 @@ function Option(props: {
 function SettingsBody(props: {
   themeName: () => string;
   setTheme: (name: string) => void;
-  position: () => Position;
-  setPosition: (p: Position) => void;
+  scale: () => number;
+  setScale: (v: number) => void;
+  metrics: () => { cols: number; rows: number };
+  posLeft: () => number;
+  setPosLeft: (v: number) => void;
+  posTop: () => number;
+  setPosTop: (v: number) => void;
   refreshMs: () => number;
   setRefreshMs: (ms: number) => void;
 }) {
   const context = usePlugin();
   const palette = useContext(paletteCtx);
+  // Terminal size in columns/rows — needed to resolve the opposite edge for
+  // the right/centre/bottom corner presets against the live panel footprint.
+  const terminal = useTerminalDimensions();
   const close = () => {
     context.ui.dialog.clear();
+  };
+
+  // Which corner the current offsets sit nearest to, so that chip can be
+  // highlighted. The offsets are the source of truth; this is just a display
+  // hint derived from them.
+  const currentCorner = (): Corner => {
+    const { cols, rows } = props.metrics();
+    const { width, height } = terminal();
+    const offX = props.posLeft();
+    const offY = props.posTop();
+    const nearTop = offY <= 3;
+    const nearBottom = offY >= Math.max(0, height - rows - 3);
+    const nearLeft = offX <= 3;
+    const nearRight = offX >= width - cols - 3;
+    if (nearTop) return nearLeft ? "top-left" : nearRight ? "top-right" : "top-center";
+    if (nearBottom)
+      return nearLeft ? "bottom-left" : nearRight ? "bottom-right" : "bottom-center";
+    // Between top and bottom: decide by horizontal side only.
+    return nearLeft ? "top-left" : nearRight ? "top-right" : "top-center";
   };
 
   return (
@@ -913,17 +1071,60 @@ function SettingsBody(props: {
         </box>
       </box>
 
-      {/* Position — click an anchor to apply it. */}
+      {/* Size — panel width as a percentage of its natural width. OpenTUI
+           renders glyphs at a fixed cell size, so this resizes the panel's
+           footprint in columns, not the text. */}
+      <box flexDirection="column" gap={0}>
+        <text fg={palette().base} attributes={TextAttributes.BOLD}>Size</text>
+        <box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={0}>
+          {SCALE_OPTIONS.map((s) => (
+            <Option
+              label={s.label}
+              active={s.value === props.scale()}
+              onSelect={() => props.setScale(s.value)}
+            />
+          ))}
+        </box>
+      </box>
+
+      {/* Position — free placement. The six chips are quick corner presets
+           (they set both offsets at once); the steppers set the exact cell
+           offset from the top-left corner. The offsets are clamped on-screen
+           when the panel renders. */}
       <box flexDirection="column" gap={0}>
         <text fg={palette().base} attributes={TextAttributes.BOLD}>Position</text>
         <box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={0}>
-          {POSITION_NAMES.map((name) => (
+          {CORNERS.map((c) => (
             <Option
-              label={POSITION_LABELS[name]}
-              active={name === props.position()}
-              onSelect={() => props.setPosition(name)}
+              label={CORNER_LABELS[c]}
+              active={c === currentCorner()}
+              onSelect={() => {
+                const { cols, rows } = props.metrics();
+                const { width, height } = terminal();
+                const off = cornerOffsets(c, cols, rows, width, height);
+                props.setPosLeft(off.posLeft);
+                props.setPosTop(off.posTop);
+              }}
             />
           ))}
+        </box>
+        <box
+          flexDirection="row"
+          flexWrap="wrap"
+          columnGap={2}
+          rowGap={0}
+          marginTop={0}
+        >
+          <Stepper
+            label="Left"
+            value={props.posLeft()}
+            onChange={props.setPosLeft}
+          />
+          <Stepper
+            label="Top"
+            value={props.posTop()}
+            onChange={props.setPosTop}
+          />
         </box>
       </box>
     </box>
