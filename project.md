@@ -397,6 +397,17 @@ palette:
 - [x] Commit всей работы — `1499198` (feat(system-stats): custom themes; 8 файлов, themes.ts + rpc.ts + index.ts + tui.tsx + README + package*). `_shot.ps1` не коммичен (сторонний).
 - ⚠️ `SYSTEM_STATS_THEME_DIR` должен быть задан в shell, где запускается OpenCode (server-половина — отдельный процесс); иначе тем нет.
 - [x] README: добавлен `Tutorial: create your first theme` (после Setup) — пошагово: dir → `sunset.yml` (7 полей palette) → `SYSTEM_STATS_THEME_DIR` → рестарт → verify; таблица `Picking the colors` (маппинг полей на реальное использование в tui.tsx) + готовая палитра amber для копирования. Коммит `7f20a1f`.- [x] **Баг-фикс (2026-11-08):** built-in темы (amber/green/mono) НЕ показывались в селекторе — `THEMES` стартовал пустым `{}` и в него мерджились только кастомные. Исправлено: `THEMES = { ...BUILTIN_THEMES }` (seed), кастомные добавляются сверху. `eb56855`. 12 пресловутых TS2722 в tui.tsx — pre-existing baseline, не наши.
+- [x] **Баг-фикс (2026-11-09): кастомные темы НЕ появлялись в селекторе ни после какого рестарта.**
+      Причина — не env и не TUI, а **схема вывода RPC `themes`** в `rpc.ts`: в `output.themes.items`
+      было `additionalProperties: false`, но в `properties` объявлены только `name/label/custom`,
+      а `palette` — не объявлен. Рантайм валидирует `output` и **срезает** необъявленные поля,
+      поэтому сервер отдавал `{ name, label, custom }` **без `palette`**. В TUI (`tui.tsx`) мердж:
+      `if (t && t.name && t.palette)` → `t.palette` undefined → **каждая** кастомная тема
+      отбраковывалась как «malformed» → в селекторе оставались только built-in. Перезапуск не
+      помогал, потому что схема одинаковая в любом процессе. Тест выше (`loadThemes` напрямую)
+      давал palette и «проходил», но круг через RPC я не проверял — вот промах. Фикс: объявить
+      `palette` (7 hex-полей, все `required`) в схеме `themes.output.items`, добавить `palette` в
+      `required`. Проверено на отдельном сервере (:4111) — RPC теперь отдаёт `palette`. `git commit` см. ниже.
 ---
 
 ## Эксплуатация: перезапуск

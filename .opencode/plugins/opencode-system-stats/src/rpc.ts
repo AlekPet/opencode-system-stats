@@ -113,9 +113,13 @@ export const Stats = Rpc.define({
         properties: {},
         additionalProperties: false,
       },
-      // One entry per valid user theme. The TUI validates each entry's shape
-      // before use, so the item schema stays loose (object) rather than
-      // re-declaring the palette.
+      // One entry per valid user theme. `palette` is declared HERE on purpose:
+      // the item schema has `additionalProperties: false`, so the server's
+      // output validator STRIPS any property not listed below. This very bug
+      // cost us a theme — without `palette` in the schema the server returned
+      // `{ name, label, custom }`, the TUI saw no palette and skipped every
+      // custom theme as "malformed". Declaring the 7 hex strings (all required)
+      // lets them survive the round-trip.
       output: {
         type: "object",
         properties: {
@@ -127,8 +131,24 @@ export const Stats = Rpc.define({
                 name: { type: "string" },
                 label: { type: ["string", "null"] },
                 custom: { type: "boolean" },
+                palette: {
+                  type: "object",
+                  properties: {
+                    bg: { type: "string" },
+                    accent: { type: "string" },
+                    base: { type: "string" },
+                    muted: { type: "string" },
+                    warn: { type: "string" },
+                    crit: { type: "string" },
+                    border: { type: "string" },
+                  },
+                  required: [
+                    "bg", "accent", "base", "muted", "warn", "crit", "border",
+                  ],
+                  additionalProperties: false,
+                },
               },
-              required: ["name", "custom"],
+              required: ["name", "custom", "palette"],
               additionalProperties: false,
             },
           },
