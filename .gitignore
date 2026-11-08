@@ -16,3 +16,6 @@ dist/
 # firecrawl / tmp
 .firecrawl/
 /tmp/
+
+# project bible (local dev notes, not for public repo)
+project.md
