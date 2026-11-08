@@ -408,6 +408,19 @@ palette:
       давал palette и «проходил», но круг через RPC я не проверял — вот промах. Фикс: объявить
       `palette` (7 hex-полей, все `required`) в схеме `themes.output.items`, добавить `palette` в
       `required`. Проверено на отдельном сервере (:4111) — RPC теперь отдаёт `palette`. `git commit` см. ниже.
+- [x] **2026-11-08: подготовка к пушу на GitHub.**
+      — Образцы тем: `examples/themes/sunset.yaml` + `examples/themes/c64.yaml` (копии из
+      `SYSTEM_STATS_THEME_DIR`, тот же формат, что в README). `examples/themes/_README.md` —
+      как скопировать и использовать.
+      — Корневой `README.md` (GitHub-facing): обзор, Install, Usage, Themes + File schema,
+      Examples, Development, Requirements. Ссылки ведут на разделы README плагина.
+      — Чистка (убрано из репозитория): `_shot.ps1` (скрин-хелпер, по библии «не коммить»),
+        `.tmp-dialog-test.mjs`/`.tsx` (дебаг-зонды в плагине), лишний `.gitignore` в папке
+        плагина, корневые `package.json`/`package-lock.json` (пустышка `typescript@^7` —
+        реальные зависимости в `opencode/plugins/opencode-system-stats/package.json`).
+        `node_modules` по-прежнему игнорируется корневым `.gitignore`. `project.md` (библия)
+        оставлен в репозитории.
+      — README плагина: добавлена секция «Example themes» → `examples/themes/`.
 ---
 
 ## Эксплуатация: перезапуск

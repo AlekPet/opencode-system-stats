@@ -222,6 +222,13 @@ TUI half over a location-scoped RPC call (`src/rpc.ts`), then merged into the
 existing theme map at setup (`src/tui.tsx`) so the built-in and custom themes
 share one code path.
 
+### Example themes
+
+This repo ships two ready-made samples in [`examples/themes/`](../../../../examples/themes/)
+at the repo root — `sunset.yaml` and `c64.yaml`. Copy one into your theme
+directory and point `SYSTEM_STATS_THEME_DIR` at it (see
+[`examples/themes/_README.md`](../../../../examples/themes/_README.md)).
+
 ## CPU temperature (LibreHardwareMonitor)
 
 CPU temperature is read with a layered cascade, so it works on the host's OS:

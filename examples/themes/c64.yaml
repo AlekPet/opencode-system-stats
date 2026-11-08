@@ -1,0 +1,10 @@
+name: c64
+label: Commodore 64
+palette:
+  bg: "#3528a8"     # background — that unmistakable C64 deep blue
+  accent: "#8b7ee8" # highlighted accents / active chips — light violet
+  base: "#a89cff"   # primary text — soft periwinkle (the classic screen text)
+  muted: "#5a4fc4"  # labels — dimmed blue-violet
+  warn: "#e8d24a"   # warning values — KERNAL yellow
+  crit: "#d63c3c"   # critical values — BASIC red (error messages)
+  border: "#6c5ce8" # panel borders — mid violet

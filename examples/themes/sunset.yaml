@@ -1,0 +1,10 @@
+name: sunset        # optional; id used by the selector
+label: Sunset CRT   # optional; shown in the list (defaults to `name`)
+palette:
+  bg: "#1a0a00"     # background
+  accent: "#ff7b00" # highlighted accents / active chips
+  base: "#ffb36b"   # primary text
+  muted: "#a85d00"  # labels
+  warn: "#ffb000"   # warning values
+  crit: "#ff3b2f"   # critical values
+  border: "#ff7b00" # panel borders
