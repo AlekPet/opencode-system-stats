@@ -441,6 +441,13 @@ palette:
          через esbuild (build-шага нет, `tsconfig` только для IDE, типы не
          чекаются). Тест-зонд `probe.ts` удалён (не коммитить).
        — Дерево чистое, всё закоммичено, готово к `git push`.
+- [x] **2026-11-08: репозиторий залит на GitHub.** Remote `origin` =
+       `git@github.com:AlekPet/opencode-system-stats.git` (SSH), ветка `main`
+       (переименована из `master`). Пуш через HTTPS + PAT (`ghp_…`), afterwards
+       origin восстановлен на SSH, upstream = `origin/main`, в `.git/config`
+       токен **не** остался (проверено grep'ом). Репозиторий публичный/приватный —
+       на усмотрение автора. ⚠️ PAT теперь в логe чата → желательно **перевыпустить**
+       токен после (Settings → PATs → Revoke).
 ---
 
 ## Эксплуатация: перезапуск
