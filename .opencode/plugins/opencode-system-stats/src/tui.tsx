@@ -879,7 +879,7 @@ function SettingsBody(props: {
         justifyContent="space-between"
         paddingX={1}
       >
-        <text fg={palette().accent} attributes={TextAttributes.BOLD}>⚙ Stats settings</text>
+        <text fg={palette().accent} attributes={TextAttributes.BOLD}>◈ Stats settings</text>
         <box onMouseUp={close} paddingX={1}>
           <text fg={palette().muted}>×</text>
         </box>
