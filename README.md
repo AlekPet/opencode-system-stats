@@ -106,3 +106,7 @@ The plugin is authored in TypeScript/TSX, but OpenCode transpiles it on the fly;
   (needs a Windows firewall rule for port 8085; mirrored networking or a
   portproxy under NAT). See the [plugin README](.opencode/plugins/opencode-system-stats/README.md#cpu-temperature-librehardwaremonitor)
   for details.
+
+## License
+
+Released under the [MIT License](LICENSE).

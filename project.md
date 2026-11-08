@@ -421,6 +421,26 @@ palette:
         `node_modules` по-прежнему игнорируется корневым `.gitignore`. `project.md` (библия)
         оставлен в репозитории.
       — README плагина: добавлена секция «Example themes» → `examples/themes/`.
+- [x] **2026-11-08: финальная подготовка к пушу на GitHub.** — MIT `LICENSE`
+       (root, © AlekPet 2026) + `.gitattributes` (`* text=auto eol=lf` — force LF
+       everywhere; `*.ps1`/`*.png` = binary). Проверка «чистый Linux
+       (Ubuntu/Debian)»:
+       - `js-yaml@^5.5.0` резолвится на **публичном** `registry.npmjs.org`
+         (`latest=5.5.0`, 5.0.0–5.5.0) — НЕ зависит от локального мирора;
+         ранее было ложное предположение, что 5.x не существует.
+       - Все 6 депов через `npm ls` чисто; `systeminformation` — чистый JS
+         (без нативной сборки / gcc / make — критично для чистого Debian/Ubuntu).
+       - **Runtime-доказательство** (esbuild bundle + `node`, без build-шага):
+         серверная половина запустилась прямо на Linux-хосте — `collectStats()`
+         отдал реальные данные (RAM 29.4/25.4 GB, RTX 3070 Ti 7387/8192 MiB,
+         GPU 51 °C), `loadThemes()` отдал 2 темы (`c64`, `sunset`) с 7 полями
+         палитры; `cpu.tempC=null` — корректная деградация на WSL.
+       - TS-ошибки (`tsc --noEmit`): 12×TS2722 в `tui.tsx` + 1×TS2339 в
+         `stats.ts` (defensive `mod.systeminformation ??`) — **pre-existing
+         baseline, не наши**; на рантайм не влияют, т.к. OpenCode транпилирует
+         через esbuild (build-шага нет, `tsconfig` только для IDE, типы не
+         чекаются). Тест-зонд `probe.ts` удалён (не коммитить).
+       — Дерево чистое, всё закоммичено, готово к `git push`.
 ---
 
 ## Эксплуатация: перезапуск

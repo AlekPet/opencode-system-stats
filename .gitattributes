@@ -1,0 +1,18 @@
+# Always normalize text files to LF in the repo and in every working tree.
+# This repo is developed on WSL/Windows but ships to Linux users, so forcing LF
+# prevents CRLF corruption on Windows clones and keeps diffs clean cross-platform.
+* text=auto eol=lf
+
+# Data / config
+*.yaml text
+*.yml text
+*.json text
+*.md text
+*.ts text
+*.tsx text
+*.js text
+
+# Binary: never line-ending-normalize
+*.ps1 binary
+*.png binary
+*.jpg binary
