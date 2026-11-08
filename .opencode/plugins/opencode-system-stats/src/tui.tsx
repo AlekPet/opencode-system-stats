@@ -103,16 +103,33 @@ const THEMES: Record<string, ThemeEntry> = { ...BUILTIN_THEMES };
 // re-derived once after the setup() merge so user themes appear too.
 let THEME_NAMES: string[] = Object.keys(BUILTIN_THEMES);
 
-// User-settable scale presets for the panel width. OpenTUI renders glyphs at a
-// fixed cell size (no font scaling), so "scale" resizes the panel's footprint
-// in columns, not the text. Kept as plain data so the selector and the body
-// share one source of truth.
-const SCALE_OPTIONS = [
-  { value: 80, label: "80%" },
-  { value: 100, label: "100%" },
-  { value: 125, label: "125%" },
-  { value: 150, label: "150%" },
+// Panel density presets. A terminal gives every glyph a fixed cell size, so a
+// plugin cannot shrink the text itself — "density" shrinks/grows the window
+// around it instead: horizontal+vertical padding and the blank space between
+// sections. Compact makes the whole panel smaller in BOTH dimensions while
+// keeping every text row intact (no clipping); spacious gives it breathing
+// room. The text size stays whatever the terminal font is.
+type Density = "compact" | "normal" | "spacious";
+
+const DENSITY_OPTIONS: { value: Density; label: string }[] = [
+  { value: "compact", label: "Compact" },
+  { value: "normal", label: "Normal" },
+  { value: "spacious", label: "Spacious" },
 ];
+
+// Per-density spacing. `padding` applies on all four sides of the panel and
+// `sectionGap` is the vertical margin above/below each stat section and the
+// footer, so both the width and height follow the chosen density.
+const PADDING_BY_DENSITY: Record<Density, number> = {
+  compact: 0,
+  normal: 1,
+  spacious: 2,
+};
+const GAP_BY_DENSITY: Record<Density, number> = {
+  compact: 0,
+  normal: 1,
+  spacious: 2,
+};
 
 // The six anchor presets offered as quick one-click placements. The actual
 // position is two free offsets (`posLeft`/`posTop` in cells from the top-left
@@ -291,7 +308,10 @@ export default Plugin.define({
         theme: "amber" as string,
         posLeft: 1 as number,
         posTop: 1 as number,
+        // `scale` is kept in the initial shape only to migrate records written
+        // by the old percent-based Size control (see `density` below).
         scale: 100 as number,
+        density: "normal" as Density,
       },
     });
     // Persisted theme name. `settings` is a reactive Solid store, so `theme` is
@@ -318,12 +338,28 @@ export default Plugin.define({
       setSettings((draft) => {
         draft.posTop = clampInt(v, 0, Number.MAX_SAFE_INTEGER);
       });
-    // Persisted panel width scale, as a percent of the natural width. Read as a
-    // property (reactive store); falls back to 100% for older records.
-    const scale = (): number => (settings.scale as number | undefined) ?? 100;
-    const setScale = (v: number) =>
+    // Persisted panel density. Read as a property (reactive store). Older
+    // records have no `density`; migrate their numeric `scale` so the panel
+    // keeps roughly the same look (80%→compact, 125/150%→spacious).
+    const density = (): Density => {
+      const stored = settings.density;
+      if (
+        stored === "compact" ||
+        stored === "normal" ||
+        stored === "spacious"
+      ) {
+        return stored;
+      }
+      const old = Number(settings.scale);
+      if (Number.isFinite(old)) {
+        if (old < 90) return "compact";
+        if (old > 110) return "spacious";
+      }
+      return "normal";
+    };
+    const setDensity = (value: Density) =>
       setSettings((draft) => {
-        draft.scale = clampInt(v, 50, 200);
+        draft.density = value;
       });
     // Whether the floating overlay is visible. Ephemeral (not persisted): the
     // panel is opened on demand via /system-stats, like the DebugOverlay.
@@ -570,8 +606,8 @@ export default Plugin.define({
           <SettingsBody
             themeName={themeName}
             setTheme={setTheme}
-            scale={scale}
-            setScale={setScale}
+            density={density}
+            setDensity={setDensity}
             metrics={panelMetrics}
             posLeft={posLeft}
             setPosLeft={setPosLeft}
@@ -606,8 +642,8 @@ export default Plugin.define({
                 setRefreshMs={setRefreshMs}
                 palette={palette}
                 themeName={themeName}
-                scale={scale}
-                setScale={setScale}
+                density={density}
+                setDensity={setDensity}
                 metrics={panelMetrics}
                 setMetrics={setPanelMetrics}
                 posLeft={posLeft}
@@ -643,8 +679,8 @@ function Panel(props: {
   setRefreshMs: (ms: number) => void;
   palette: () => Palette;
   themeName: () => string;
-  scale: () => number;
-  setScale: (v: number) => void;
+  density: () => Density;
+  setDensity: (v: Density) => void;
   metrics: () => { cols: number; rows: number };
   setMetrics: (m: { cols: number; rows: number }) => void;
   posLeft: () => number;
@@ -661,11 +697,11 @@ function Panel(props: {
   const setRefreshMs = props.setRefreshMs;
   const palette = props.palette;
   const themeName = props.themeName;
-  const scale = props.scale;
+  const density = props.density;
   const metrics = props.metrics;
-  // `setScale`/`setMetrics` are stable setter functions (not reactive
+  // `setDensity`/`setMetrics` are stable setter functions (not reactive
   // accessors), so destructuring them is safe — same as `setRefreshMs` above.
-  const setScale = props.setScale;
+  const setDensity = props.setDensity;
   const setMetrics = props.setMetrics;
   // `openSettings` is a stable function (created once in setup), so it is safe
   // to destructure here like the other setters above.
@@ -695,20 +731,21 @@ function Panel(props: {
   };
 
   // Inner padding per side and the bordered frame it adds to the width.
-  const PADDING = 1; // was 2 — tighter panel
+  // Density scales both: `padding` grows the window on all four sides while
+  // `sectionGap` is the blank margin above/below each stat section and the
+  // footer, so the same preset shrinks/grows width AND height without ever
+  // cutting a text row (glyph size is fixed by the terminal).
+  const padding = () => PADDING_BY_DENSITY[density()];
+  const sectionGap = () => GAP_BY_DENSITY[density()];
   const FRAME = 2; // left + right border
-  // Natural (unscaled) width is clamped to this base range so scale=100%
-  // renders exactly as before. `scale` then multiplies it and the outer clamp
-  // lets the footprint drift a little beyond the base range (24–64 cols).
+
+  // Natural content width is clamped to this base range so the panel hugs the
+  // widest rendered line instead of wasting horizontal space; density then
+  // adds the surrounding padding on top.
   const BASE_MIN_COLS = 32;
   const BASE_MAX_COLS = 52;
   const MIN_COLS = 24;
   const MAX_COLS = 64;
-
-  // Approximate panel height in rows. Values never wrap (the width always fits
-  // the widest line), so the row count is fixed; this is only used to keep
-  // bottom-anchored placements on-screen.
-  const PANEL_ROWS = 20;
 
   // Force a re-render once per second so "updated Ns ago" keeps ticking even
   // between successful refreshes. Reads a plain, non-reactive local tick value
@@ -765,33 +802,34 @@ function Panel(props: {
     ];
     return Math.max(BASE_MIN_COLS, ...lines.map((l) => l.length));
   };
-  // Natural width clamped to the base range, then scaled. `scale` is a percent
-  // of the natural width — the only real "zoom" available (OpenTUI renders
-  // glyphs at a fixed cell size), so it resizes the panel's footprint, not the
-  // text. The outer clamp keeps even a large scale from going off-screen.
-  //
+  // Content width (before padding/frame) and the live panel footprint.
   // Both are memos, not plain consts: a Solid component body runs ONCE, so a
-  // `const cols = …scale()…` would freeze at the first render and `width={cols}`
-  // would never change when the user picks another scale. Reading `cols()` in
-  // the JSX/effect keeps `scale` (and the content width) tracked.
-  const unscaledCols = createMemo(() =>
-    Math.min(
-      BASE_MAX_COLS,
-      Math.max(BASE_MIN_COLS, contentCols() + PADDING * 2 + FRAME)
-    )
+  // `const cols = …density()…` would freeze at the first render and
+  // `width={cols}` would never change when the user picks another density.
+  // Reading `cols()`/`rows()` in the JSX/effect keeps the density (and the
+  // content width) tracked.
+  const contentWidth = createMemo(() =>
+    Math.min(BASE_MAX_COLS, Math.max(BASE_MIN_COLS, contentCols()))
   );
   const cols = createMemo(() =>
     clampInt(
-      Math.round(unscaledCols() * scale() / 100),
+      contentWidth() + padding() * 2 + FRAME,
       MIN_COLS,
       MAX_COLS
     )
+  );
+  // 9 content rows (GPU 4 + RAM 2 + CPU 2 + footer 1), the bordered frame,
+  // vertical padding and the 8 section margins (top+bottom on 4 boxes). Values
+  // never wrap because the width always fits the widest line, so this is exact
+  // enough to keep bottom-anchored placements on-screen.
+  const rows = createMemo(
+    () => 9 + padding() * 2 + FRAME + sectionGap() * 8
   );
 
   // Report the live footprint so the settings dialog can resolve the opposite
   // edge for the right/centre/bottom corner presets.
   createEffect(() => {
-    setMetrics({ cols: cols(), rows: PANEL_ROWS });
+    setMetrics({ cols: cols(), rows: rows() });
   });
 
   return (
@@ -804,7 +842,7 @@ function Panel(props: {
           posLeft(),
           posTop(),
           cols(),
-          PANEL_ROWS,
+          rows(),
           terminal().width,
           terminal().height
         )}
@@ -817,7 +855,7 @@ function Panel(props: {
             <box
               border
               borderStyle="double"
-              padding={PADDING}
+              padding={padding()}
               borderColor={palette().border}
               backgroundColor={palette().bg}
             >
@@ -831,14 +869,14 @@ function Panel(props: {
           <box
             border
             borderStyle="double"
-            padding={PADDING}
+            padding={padding()}
             width={cols()}
             borderColor={palette().border}
             backgroundColor={palette().bg}
             title={" " + safeString(THEMES[themeName()]?.label + " ")}
             onMouseUp={() => void openSettings()}
           >
-            <box flexDirection="column" gap={0} marginY={1}>
+            <box flexDirection="column" gap={0} marginY={sectionGap()}>
               <StatRow
                 label="GPU"
                 value={safeString(safeGet(latest(), "gpu.name"))}
@@ -859,7 +897,7 @@ function Panel(props: {
               />
             </box>
 
-            <box flexDirection="column" gap={0} marginY={1}>
+            <box flexDirection="column" gap={0} marginY={sectionGap()}>
               <StatRow
                 label="RAM"
                 value={`${formatGB(safeGet(latest(), "ram.usedBytes"))} / ${formatGB(
@@ -872,7 +910,7 @@ function Panel(props: {
               />
             </box>
 
-            <box flexDirection="column" gap={0} marginY={1}>
+            <box flexDirection="column" gap={0} marginY={sectionGap()}>
               <StatRow
                 label="CPU"
                 value={`${Math.round(safeGet(latest(), "cpu.loadPct", 0))}%`}
@@ -885,7 +923,7 @@ function Panel(props: {
               />
             </box>
             <box
-              marginY={1}
+              marginY={sectionGap()}
               flexDirection="row"
               alignItems="center"
               justifyContent="space-between"
@@ -985,8 +1023,8 @@ function Stepper(props: {
 function SettingsBody(props: {
   themeName: () => string;
   setTheme: (name: string) => void;
-  scale: () => number;
-  setScale: (v: number) => void;
+  density: () => Density;
+  setDensity: (v: Density) => void;
   metrics: () => { cols: number; rows: number };
   posLeft: () => number;
   setPosLeft: (v: number) => void;
@@ -1081,17 +1119,17 @@ function SettingsBody(props: {
         </box>
       </box>
 
-      {/* Size — panel width as a percentage of its natural width. OpenTUI
+      {/* Density — how much breathing room surrounds the text. Density is the only "zoom" available (OpenTUI renders glyphs at a fixed cell size), so it shrinks/grows the window on all four sides AND between sections, smaller/larger in BOTH dimensions, never clipping a text row.
            renders glyphs at a fixed cell size, so this resizes the panel's
            footprint in columns, not the text. */}
       <box flexDirection="column" gap={0}>
-        <text fg={palette().base} attributes={TextAttributes.BOLD}>Size</text>
+        <text fg={palette().base} attributes={TextAttributes.BOLD}>Density</text>
         <box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={0}>
-          {SCALE_OPTIONS.map((s) => (
+          {DENSITY_OPTIONS.map((d) => (
             <Option
-              label={s.label}
-              active={s.value === props.scale()}
-              onSelect={() => props.setScale(s.value)}
+              label={d.label}
+              active={d.value === props.density()}
+              onSelect={() => props.setDensity(d.value)}
             />
           ))}
         </box>
