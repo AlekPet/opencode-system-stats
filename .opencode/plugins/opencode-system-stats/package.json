@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "author": "AlekPet <alexepetrof@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com:AlekPet/opencode-system-stats.git"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./tui": "./src/tui.tsx",
