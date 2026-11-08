@@ -113,6 +113,68 @@ The themes are loaded once at startup and merged into the same selector you use
 for the built-in themes — no new widget, just more options in the theme list
 (`/system-stats-theme` or the panel footer).
 
+### Tutorial: create your first theme
+
+Let's make a "Sunset CRT" theme from scratch.
+
+1. **Create the theme directory** (skip if you already have one):
+   ```bash
+   mkdir -p "$HOME/.config/system-stats-themes"
+   ```
+
+2. **Create a YAML file** for the theme — e.g. `sunset.yml`. It needs a
+   `palette` block with the seven phosphor fields:
+   ```yaml
+   name: sunset
+   label: Sunset CRT
+   palette:
+     bg: "#1a0a00"     # panel background
+     accent: "#ff7b00" # active chips / highlighted accents
+     base: "#ffb36b"   # primary text (values, headings)
+     muted: "#a85d00"  # labels / dim text
+     warn: "#ffb000"   # warning values (load/temp bands)
+     crit: "#ff3b2f"   # critical values (load/temp bands), errors
+     border: "#ff7b00" # panel borders
+   ```
+   `name` is the id the selector uses; `label` is what you see in the list
+   (defaults to `name`). Drop the `name:` line and the filename stem is used
+   instead (`sunset.yml` → `sunset`).
+
+3. **Point OpenCode at the directory.** Add the env var to your shell profile
+   (`.bashrc` / `.zshrc`) so it's set each time:
+   ```bash
+   export SYSTEM_STATS_THEME_DIR="$HOME/.config/system-stats-themes"
+   ```
+   ⚠️ It's read by the server half (a separate process), so it must be set in
+   the shell where you launch OpenCode — see [Setup](#setup).
+
+4. **Restart OpenCode** (service + TUI). Your theme joins the same selector you
+   use for the built-ins — `/system-stats-theme` or the panel footer.
+
+5. **Verify.** Open the theme selector; your theme should be in the list. If it
+   doesn't appear, check the service log — a bad file is skipped with a
+   `console.warn` explaining why (see [Errors are non-fatal](#errors-are-non-fatal)).
+
+#### Picking the colors
+
+The seven fields map to real parts of the panel:
+
+| Field      | What it colors                                            |
+| ---------- | --------------------------------------------------------- |
+| `bg`       | panel background                                          |
+| `accent`   | active chip background, highlighted accents, `● LIVE`     |
+| `base`     | primary text (values, headings)                           |
+| `muted`    | labels / dim / secondary text                             |
+| `warn`     | warning values (load / temperature bands)                 |
+| `crit`     | critical values (load / temperature bands), error text    |
+| `border`   | panel borders                                             |
+
+Every value must be a hex color (`#fff` or `#ff8800`, 3- or 6-digit). `name`
+must match `^[a-z0-9][a-z0-9._-]*$`. The easiest starting point is to copy one
+of the built-in palettes and tweak it — the amber one is
+`bg:#1a1200 accent:#ffb000 base:#ffcc66 muted:#b37a00 warn:#ff9500
+crit:#ff5530 border:#ffb000`. For the full rules, see [File schema](#file-schema).
+
 ### File schema
 
 Each file is one theme:
