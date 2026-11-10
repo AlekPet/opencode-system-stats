@@ -57,6 +57,40 @@ required. Follow these steps to install the plugin:
 
 The plugin is automatically loaded by OpenCode when placed in the correct location.
 
+> ⚠️ **A freshly copied plugin directory needs a service restart.** OpenCode
+> watches config files and reloads plugins after a config *save*, but a brand-new
+> plugin *directory* dropped into a plugins folder is reliably picked up only after
+> `opencode service restart` (then reopen the TUI). If the panel shows
+> `RPC is unavailable: opencode-system-stats`, run `opencode service restart`.
+
+### Global install (all projects)
+
+To make the plugin available in **every** OpenCode project and session, install it
+into the global plugins directory instead of a project's `.opencode/plugins/`:
+
+```bash
+mkdir -p ~/.config/opencode/plugins
+ln -s /path/to/opencode-system-stats/.opencode/plugins/opencode-system-stats ~/.config/opencode/plugins/opencode-system-stats
+```
+
+This uses the same discovery layout as project plugins — OpenCode scans
+`~/.config/opencode/plugins/` for plugin directories.
+
+> 💡 **Symlink = automatic updates.** Symlinking (rather than `cp -r`) means the
+> global plugin always points at your source tree: any change you make in
+> `.opencode/plugins/opencode-system-stats` is live in the global install
+> immediately — no re-copying. If you already copied the plugin earlier, remove
+> that copy first (`rm -rf ~/.config/opencode/plugins/opencode-system-stats`) before
+> symlinking, so the directory isn't a regular folder holding a stale copy.
+
+> ⚠️ **A freshly symlinked plugin directory needs a service restart.** OpenCode
+> watches config files and reloads plugins after a config *save*, but a brand-new
+> plugin *directory* dropped into a plugins folder is reliably picked up only after
+> `opencode service restart`. If the panel shows
+> `RPC is unavailable: opencode-system-stats`, run `opencode service restart`.
+> This also applies **after editing the source**: the daemon may not reload the
+> plugin bundle on the fly, so restart `opencode service` to pick up your changes.
+
 ## Quick Start
 
 To quickly get started with the system stats plugin:

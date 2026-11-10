@@ -19,3 +19,8 @@ dist/
 
 # project bible (local dev notes, not for public repo)
 project.md
+
+# Symlink for the global plugin install (~/.config/opencode/plugins/ -> here).
+# It's circular/self-referential inside the plugin dir; keep it in the working
+# tree so the global install resolves, but NEVER commit it to git.
+.opencode/plugins/opencode-system-stats/opencode-system-stats
