@@ -7,7 +7,7 @@ TUI, with a configurable refresh rate.
 ## Features
 
 - **VRAM** used / total, plus utilization and temperature (color-coded bands).
-- **RAM** used / total / free.
+- **RAM** used / total / free (free = available memory, incl. reclaimable cache).
 - **CPU load %** (two-sample delta on `/proc/stat`) and temperature. CPU temp is
   read cross-platform — LibreHardwareMonitor over HTTP on WSL2/Windows,
   `systeminformation` on bare Linux/macOS, sysfs as a last resort — and the
@@ -114,7 +114,8 @@ To quickly get started with the system stats plugin:
 - **RPC contract** (`src/rpc.ts`) defines the shared JSON Schema.
 - **Host stats** (`src/stats.ts`) collect data on the server side:
   - GPU: `nvidia-smi --query-gpu=name,memory.used,memory.total,temperature.gpu,utilization.gpu --format=csv`
-  - RAM: `/proc/meminfo` (used = Total − Available)
+  - RAM: `/proc/meminfo` (used = Total − Available, free = Available; MemFree is
+    not used because it excludes reclaimable page cache)
   - CPU load: two `/proc/stat` samples ~150 ms apart
   - CPU temp: layered cascade — LHM over HTTP (WSL2/Windows sensor host),
     `systeminformation` (bare Linux/macOS), then sysfs; `null` when nothing

@@ -84,7 +84,16 @@ function readGpu(signal?: AbortSignal): GpuInfo {
   }
 }
 
-/** /proc/meminfo (values in kB -> *1024). Used = Total - Available. */
+/**
+ * /proc/meminfo (values in kB -> *1024).
+ *
+ * `freeBytes` is MemAvailable, not MemFree: on Linux MemFree excludes reclaimable
+ * page cache, so it is tiny (a few hundred MB) on a healthy machine and does not
+ * add up with `used = MemTotal - MemAvailable`. Reporting MemFree made the panel
+ * show e.g. "20.42 / 25.44 GB" used with only "0.24 GB" free. MemAvailable is what
+ * the user can actually allocate, and `usedBytes + freeBytes === totalBytes`.
+ * Fall back to MemFree on kernels without MemAvailable (< 3.14).
+ */
 function readRam(): RamInfo {
   const empty: RamInfo = { totalBytes: 0, usedBytes: 0, freeBytes: 0 }
   try {
@@ -94,10 +103,10 @@ function readRam(): RamInfo {
       return m ? parseInt(m[1], 10) : 0
     }
     const total = get("MemTotal")
-    const available = get("MemAvailable")
-    const free = get("MemFree")
-    const used = total > available ? total - available : total - free
-    return { totalBytes: total * 1024, usedBytes: used * 1024, freeBytes: free * 1024 }
+    const memFree = get("MemFree")
+    const available = get("MemAvailable") || memFree
+    const used = total > available ? total - available : total - memFree
+    return { totalBytes: total * 1024, usedBytes: used * 1024, freeBytes: available * 1024 }
   } catch {
     return empty
   }

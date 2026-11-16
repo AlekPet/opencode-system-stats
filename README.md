@@ -13,7 +13,7 @@ plain YAML files.
 ## Features
 
 - **VRAM** used / total + utilization and temperature (color-coded bands).
-- **RAM** used / total / free.
+- **RAM** used / total / free (free = available, incl. reclaimable cache).
 - **CPU load %** and temperature — CPU temp is read cross-platform:
   LibreHardwareMonitor over HTTP on WSL2/Windows, `systeminformation` on bare
   Linux/macOS, sysfs as a last resort. Renders `—` when nothing exposes a sensor.
